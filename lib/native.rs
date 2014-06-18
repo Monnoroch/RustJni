@@ -30,6 +30,8 @@ pub type jobjectArray = jobject;
 
 pub type jweak = jobject;
 
+
+// TODO: deal with repr
 pub enum jvalue {
 	Jz(jboolean),
 	Jb(jbyte),
