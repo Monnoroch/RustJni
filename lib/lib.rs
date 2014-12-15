@@ -1,6 +1,7 @@
-#![crate_id = "jni#0.1"]
+#![crate_name = "jni"]
 #![crate_type = "rlib"]
 
+#![feature(unsafe_destructor)]
 #![feature(globs)]
 #![feature(macro_rules)]
 #![allow(non_camel_case_types)]
