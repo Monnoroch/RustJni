@@ -4,6 +4,7 @@ extern crate debug;
 use std::mem;
 use std::fmt;
 use std::string;
+use std::c_str::CString;
 
 use native::*;
 
@@ -11,11 +12,11 @@ use native::*;
 #[deriving(Clone)]
 pub struct JavaVMOption {
 	pub optionString: string::String,
-	pub extraInfo: *::libc::c_void
+	pub extraInfo: *const ::libc::c_void
 }
 
 impl JavaVMOption {
-	pub fn new(option: &str, extra: *::libc::c_void) -> JavaVMOption {
+	pub fn new(option: &str, extra: *const ::libc::c_void) -> JavaVMOption {
 		JavaVMOption{
 			optionString: option.to_string(),
 			extraInfo: extra
@@ -68,29 +69,29 @@ impl JavaVMAttachArgs {
 
 #[deriving(Clone)]
 pub struct JavaVM {
-	ptr: *JavaVMImpl,
+	ptr: *mut JavaVMImpl,
 	version: JniVersion,
+	name: CString,
 	owned: bool
 }
 
 impl JavaVM {
-	pub fn new(args: JavaVMInitArgs) -> JavaVM {
+	pub fn new(args: JavaVMInitArgs, name: &str) -> JavaVM {
 		let (res, jvm) = unsafe {
-			let mut jvm: *JavaVMImpl = 0 as *JavaVMImpl;
-			let mut env: *JNIEnvImpl = 0 as *JNIEnvImpl;
-
+			let mut jvm: *mut JavaVMImpl = 0 as *mut JavaVMImpl;
+			let mut env: *mut JNIEnvImpl = 0 as *mut JNIEnvImpl;
 			let mut vm_opts = vec![];
 			for opt in args.options.iter() {
 				vm_opts.push(JavaVMOptionImpl_new(opt));
 			}
-			let argsImpl = JavaVMInitArgsImpl{
+			let mut argsImpl = JavaVMInitArgsImpl{
 				version: args.version,
 				nOptions: args.options.len() as jint,
-				options: vm_opts.as_ptr(),
+				options: vm_opts.as_mut_ptr(),
 				ignoreUnrecognized: args.ignoreUnrecognized as jboolean
 			};
 
-			let res = JNI_CreateJavaVM(&mut jvm, &mut env, &argsImpl);
+			let res = JNI_CreateJavaVM(&mut jvm, &mut env, &mut argsImpl);
 
 			for &i in vm_opts.iter() {
 				libc::free(i.optionString as *mut libc::c_void);
@@ -103,23 +104,25 @@ impl JavaVM {
 			JNI_OK => JavaVM{
 				ptr: jvm,
 				version: args.version,
+				name: name.to_c_str(),
 				owned: true
 			},
 			_ => fail!("JNI_CreateJavaVM error: {}", res)
 		}
 	}
 
-	pub fn from(ptr: *JavaVMImpl) -> JavaVM {
+	pub fn from(ptr: *mut JavaVMImpl) -> JavaVM {
 		let mut res = JavaVM{
 			ptr: ptr,
 			version: JNI_VERSION_1_1,
+			name: "".to_c_str(),
 			owned: false
 		};
 		res.version = res.get_env().version();
 		res
 	}
 
-	pub fn ptr(&self) -> *JavaVMImpl {
+	pub fn ptr(&self) -> *mut JavaVMImpl {
 		self.ptr
 	}
 
@@ -127,36 +130,39 @@ impl JavaVM {
 		return self.version
 	}
 
-	pub fn get_env(&self) -> JavaEnv {
+	pub fn get_env(&mut self) -> JavaEnv {
 		unsafe {
-			self.get_env_gen((**self.ptr).AttachCurrentThread)
+			let mut jni = **self.ptr;
+			self.get_env_gen(jni.AttachCurrentThread)
 		}
 	}
 
-	pub fn get_env_daemon(&self) -> JavaEnv {
+	pub fn get_env_daemon(&mut self) -> JavaEnv {
 		unsafe {
-			self.get_env_gen((**self.ptr).AttachCurrentThreadAsDaemon)
+			let mut jni = **self.ptr;
+			self.get_env_gen(jni.AttachCurrentThreadAsDaemon)
 		}
 	}
 
-	pub fn detach_current_thread(&self) -> bool {
+	pub fn detach_current_thread(&mut self) -> bool {
 		unsafe {
-			((**self.ptr).DetachCurrentThread)(self.ptr) == JNI_OK
+			let mut jni = **self.ptr;
+			(jni.DetachCurrentThread)(self.ptr) == JNI_OK
 		}
 	}
 
-	unsafe fn get_env_gen(&self, fun: extern "C" fn(vm: *JavaVMImpl, penv: &mut *JNIEnvImpl, args: *JavaVMAttachArgsImpl) -> JniError) -> JavaEnv {
-		let mut env: *JNIEnvImpl = 0 as *JNIEnvImpl;
+	unsafe fn get_env_gen(&mut self, fun: extern "C" fn(vm: *mut JavaVMImpl, penv: &mut *mut JNIEnvImpl, args: *mut JavaVMAttachArgsImpl) -> JniError) -> JavaEnv {
+		let mut env: *mut JNIEnvImpl = 0 as *mut JNIEnvImpl;
 		let res = ((**self.ptr).GetEnv)(self.ptr, &mut env, self.version());
 		match res {
 			JNI_OK => JavaEnv {ptr: env},
 			JNI_EDETACHED => {
-				let attachArgs = JavaVMAttachArgsImpl{
+				let mut attachArgs = JavaVMAttachArgsImpl{
 					version: self.version(),
-					name: "".to_c_str().unwrap(), // TODO: check for leak
+					name: self.name.as_mut_ptr(),
 					group: 0 as jobject
 				};
-				let res = fun(self.ptr, &mut env, &attachArgs);
+				let res = fun(self.ptr, &mut env, &mut attachArgs);
 				match res {
 					JNI_OK => JavaEnv {ptr: env},
 					_ => fail!("AttachCurrentThread error {}!", res)
@@ -191,7 +197,7 @@ impl Drop for JavaVM {
 
 #[deriving(Clone)]
 pub struct JavaEnv {
-	ptr: *JNIEnvImpl
+	ptr: *mut JNIEnvImpl
 }
 
 impl fmt::Show for JavaEnv {
@@ -207,7 +213,7 @@ impl JavaEnv {
 		}
 	}
 
-	pub fn ptr(&self) -> *JNIEnvImpl {
+	pub fn ptr(&self) -> *mut JNIEnvImpl {
 		self.ptr
 	}
 
@@ -215,7 +221,7 @@ impl JavaEnv {
 		JObject::from(
 			self,
 			name.with_c_str(|name| unsafe {
-				((**self.ptr).DefineClass)(self.ptr, name, loader.get_obj(), buf.as_ptr() as *jbyte, len as jsize)
+				((**self.ptr).DefineClass)(self.ptr, name, loader.get_obj(), buf.as_ptr() as *const jbyte, len as jsize)
 			}) as jobject
 		)
 	}
@@ -370,7 +376,7 @@ impl JavaEnv {
 
 	pub fn jvm(&self) -> JavaVM {
 		JavaVM::from(unsafe {
-			let mut jvm: *JavaVMImpl = 0 as *JavaVMImpl;
+			let mut jvm: *mut JavaVMImpl = 0 as *mut JavaVMImpl;
 			((**self.ptr).GetJavaVM)(self.ptr, &mut jvm);
 			jvm
 		})
@@ -651,7 +657,7 @@ impl JavaString {
 struct JavaStringChars {
 	s: JavaString,
 	isCopy: bool,
-	chars: *::libc::c_char
+	chars: *const ::libc::c_char
 }
 
 impl Drop for JavaStringChars {

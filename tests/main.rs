@@ -8,13 +8,13 @@ use jni::*;
 
 
 fn main() {
-	let opt = JavaVMOption::new("-verbose:jni", 0 as *::libc::c_void);
+	let opt = JavaVMOption::new("-verbose:jni", 0 as *const ::libc::c_void);
 	println!("Opt is {}", opt);
 
 	let args = JavaVMInitArgs::new(jni::JNI_VERSION_1_4, [opt], false);
 	println!("Args is {}", args);
 
-	let jvm = JavaVM::new(args);
+	let mut jvm = JavaVM::new(args, "");
 	println!("Jvm is {}", jvm);
 
 	let env = jvm.get_env();
