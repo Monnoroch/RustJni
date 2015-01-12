@@ -1,10 +1,10 @@
 extern crate libc;
-extern crate debug;
+// extern crate debug;
 
 use std::mem;
 use std::fmt;
 use std::string;
-use std::c_str::CString;
+use std::ffi::CString;
 
 use native::*;
 
@@ -101,20 +101,20 @@ impl JavaVM {
 		};
 
 		match res {
-			JNI_OK => JavaVM{
+			JniError::JNI_OK => JavaVM{
 				ptr: jvm,
 				version: args.version,
 				name: name.to_c_str(),
 				owned: true
 			},
-			_ => fail!("JNI_CreateJavaVM error: {}", res)
+			_ => panic!("JNI_CreateJavaVM error: {}", res)
 		}
 	}
 
 	pub fn from(ptr: *mut JavaVMImpl) -> JavaVM {
 		let mut res = JavaVM{
 			ptr: ptr,
-			version: JNI_VERSION_1_1,
+			version: JniVersion::JNI_VERSION_1_1,
 			name: "".to_c_str(),
 			owned: false
 		};
@@ -147,7 +147,7 @@ impl JavaVM {
 	pub fn detach_current_thread(&mut self) -> bool {
 		unsafe {
 			let mut jni = **self.ptr;
-			(jni.DetachCurrentThread)(self.ptr) == JNI_OK
+			(jni.DetachCurrentThread)(self.ptr) == JniError::JNI_OK
 		}
 	}
 
@@ -155,7 +155,7 @@ impl JavaVM {
 		let mut env: *mut JNIEnvImpl = 0 as *mut JNIEnvImpl;
 		let res = ((**self.ptr).GetEnv)(self.ptr, &mut env, self.version());
 		match res {
-			JNI_OK => JavaEnv {ptr: env},
+			JniError::JNI_OK => JavaEnv {ptr: env},
 			JNI_EDETACHED => {
 				let mut attachArgs = JavaVMAttachArgsImpl{
 					version: self.version(),
@@ -164,17 +164,17 @@ impl JavaVM {
 				};
 				let res = fun(self.ptr, &mut env, &mut attachArgs);
 				match res {
-					JNI_OK => JavaEnv {ptr: env},
-					_ => fail!("AttachCurrentThread error {}!", res)
+					JniError::JNI_OK => JavaEnv {ptr: env},
+					_ => panic!("AttachCurrentThread error {}!", res)
 				}
 			},
-			JNI_EVERSION => fail!("Version {} is not supported by GetEnv!", self.version()),
-			_ => fail!("GetEnv error {}!", res)
+			JNI_EVERSION => panic!("Version {} is not supported by GetEnv!", self.version()),
+			_ => panic!("GetEnv error {}!", res)
 		}
 	}
 
 	unsafe fn destroy_java_vm(&self) -> bool {
-		((**self.ptr).DestroyJavaVM)(self.ptr) == JNI_OK
+		((**self.ptr).DestroyJavaVM)(self.ptr) == JniError::JNI_OK
 	}
 }
 
@@ -217,7 +217,7 @@ impl JavaEnv {
 		self.ptr
 	}
 
-	pub fn define_class<T: JObject>(&self, name: &str, loader: &T, buf: &[u8], len: uint) -> JavaClass {
+	pub fn define_class<T: JObject>(&self, name: &str, loader: &T, buf: &[u8], len: usize) -> JavaClass {
 		JObject::from(
 			self,
 			name.with_c_str(|name| unsafe {
@@ -253,13 +253,13 @@ impl JavaEnv {
 
 	pub fn throw(&self, obj: &JavaThrowable) -> bool {
 		unsafe {
-			((**self.ptr).Throw)(self.ptr, obj.ptr) == JNI_OK
+			((**self.ptr).Throw)(self.ptr, obj.ptr) == JniError::JNI_OK
 		}
 	}
 
 	pub fn throw_new(&self, clazz: &JavaClass, msg: &str) -> bool {
 		msg.with_c_str(|msg| unsafe {
-			((**self.ptr).ThrowNew)(self.ptr, clazz.ptr, msg) == JNI_OK
+			((**self.ptr).ThrowNew)(self.ptr, clazz.ptr, msg) == JniError::JNI_OK
 		})
 	}
 
@@ -290,9 +290,9 @@ impl JavaEnv {
 		})
 	}
 
-	pub fn push_local_frame(&self, capacity: int) -> bool {
+	pub fn push_local_frame(&self, capacity: isize) -> bool {
 		unsafe {
-			((**self.ptr).PushLocalFrame)(self.ptr, capacity as jint) == JNI_OK
+			((**self.ptr).PushLocalFrame)(self.ptr, capacity as jint) == JniError::JNI_OK
 		}
 	}
 
@@ -350,9 +350,9 @@ impl JavaEnv {
 		}
 	}
 
-	pub fn ensure_local_capacity(&self, capacity: int) -> bool {
+	pub fn ensure_local_capacity(&self, capacity: isize) -> bool {
 		unsafe {
-			((**self.ptr).EnsureLocalCapacity)(self.ptr, capacity as jint) == JNI_OK
+			((**self.ptr).EnsureLocalCapacity)(self.ptr, capacity as jint) == JniError::JNI_OK
 		}
 	}
 
@@ -364,13 +364,13 @@ impl JavaEnv {
 
 	pub fn monitor_enter<T: JObject>(&self, obj: &T) -> bool {
 		unsafe {
-			((**self.ptr).MonitorEnter)(self.ptr, obj.get_obj()) == JNI_OK
+			((**self.ptr).MonitorEnter)(self.ptr, obj.get_obj()) == JniError::JNI_OK
 		}
 	}
 
 	pub fn monitor_exit<T: JObject>(&self, obj: &T) -> bool {
 		unsafe {
-			((**self.ptr).MonitorExit)(self.ptr, obj.get_obj()) == JNI_OK
+			((**self.ptr).MonitorExit)(self.ptr, obj.get_obj()) == JniError::JNI_OK
 		}
 	}
 
@@ -408,18 +408,18 @@ pub trait JObject: Drop + Clone {
 	fn inc_ref(&self) -> jobject {
 		let env = self.get_env();
 		match self.ref_type() {
-			Local => env.new_local_ref(self),
-			Global => env.new_global_ref(self),
-			Weak => env.new_weak_ref(self) as jobject,
+			RefType::Local => env.new_local_ref(self),
+			RefType::Global => env.new_global_ref(self),
+			RefType::Weak => env.new_weak_ref(self) as jobject,
 		}
 	}
 
 	fn dec_ref(&mut self) {
 		let env = self.get_env();
 		match self.ref_type() {
-			Local => env.delete_local_ref(self),
-			Global => env.delete_global_ref(self),
-			Weak => env.delete_weak_ref(self)
+			RefType::Local => env.delete_local_ref(self),
+			RefType::Global => env.delete_global_ref(self),
+			RefType::Weak => env.delete_weak_ref(self)
 		}
 	}
 
@@ -475,11 +475,11 @@ macro_rules! impl_jobject_base(
 			}
 		}
 	);
-)
+);
 
 macro_rules! impl_jobject(
 	($cls:ident, $native:ident) => (
-		impl_jobject_base!($cls)
+		impl_jobject_base!($cls);
 
 		impl JObject for $cls {
 			fn get_env(&self) -> JavaEnv {
@@ -498,7 +498,7 @@ macro_rules! impl_jobject(
 				$cls{
 					env: env.clone(),
 					ptr: ptr as $native,
-					rtype: Local
+					rtype: RefType::Local
 				}
 			}
 
@@ -507,7 +507,7 @@ macro_rules! impl_jobject(
 				$cls{
 					env: env,
 					ptr: env.new_global_ref(self),
-					rtype: Global
+					rtype: RefType::Global
 				}
 			}
 
@@ -516,16 +516,16 @@ macro_rules! impl_jobject(
 				$cls{
 					env: env,
 					ptr: env.new_weak_ref(self),
-					rtype: Weak
+					rtype: RefType::Weak
 				}
 			}
 		}
 	);
-)
+);
 
 macro_rules! impl_jarray(
 	($cls:ident, $native:ident) => (
-		impl_jobject!($cls, $native)
+		impl_jobject!($cls, $native);
 
 		// impl $cls {
 		// 	pub fn as_jarray(&self) -> JavaArray {
@@ -537,7 +537,7 @@ macro_rules! impl_jarray(
 		// 	}
 		// }
 	);
-)
+);
 
 
 
@@ -548,7 +548,7 @@ pub struct JavaObject {
 	rtype: RefType
 }
 
-impl_jobject!(JavaObject, jobject)
+impl_jobject!(JavaObject, jobject);
 
 
 #[deriving(Show)]
@@ -558,7 +558,7 @@ pub struct JavaClass {
 	rtype: RefType
 }
 
-impl_jobject!(JavaClass, jclass)
+impl_jobject!(JavaClass, jclass);
 
 impl JavaClass {
 	pub fn get_super(&self) -> JavaClass {
@@ -571,7 +571,7 @@ impl JavaClass {
 
 	pub fn find(env: &JavaEnv, name: &str) -> JavaClass {
 		match env.find_class(name) {
-			None => fail!("Class \"{}\" not found!", name),
+			None => panic!("Class \"{}\" not found!", name),
 			Some(cls) => cls
 		}
 	}
@@ -585,7 +585,7 @@ pub struct JavaThrowable {
 	rtype: RefType
 }
 
-impl_jobject!(JavaThrowable, jthrowable)
+impl_jobject!(JavaThrowable, jthrowable);
 
 
 pub struct JavaString {
@@ -594,7 +594,7 @@ pub struct JavaString {
 	rtype: RefType
 }
 
-impl_jobject!(JavaString, jstring)
+impl_jobject!(JavaString, jstring);
 
 
 impl fmt::Show for JavaString {
@@ -610,15 +610,15 @@ impl JavaString {
 		}))
 	}
 
-	pub fn len(&self) -> uint {
+	pub fn len(&self) -> usize {
 		unsafe {
-			((**self.get_env().ptr).GetStringLength)(self.get_env().ptr, self.ptr) as uint
+			((**self.get_env().ptr).GetStringLength)(self.get_env().ptr, self.ptr) as usize
 		}
 	}
 
-	pub fn size(&self) -> uint {
+	pub fn size(&self) -> usize {
 		unsafe {
-			((**self.get_env().ptr).GetStringUTFLength)(self.get_env().ptr, self.ptr) as uint
+			((**self.get_env().ptr).GetStringUTFLength)(self.get_env().ptr, self.ptr) as usize
 		}
 	}
 
@@ -638,12 +638,12 @@ impl JavaString {
 		}
 	}
 
-	pub fn region(&self, start: uint, length: uint) -> string::String {
+	pub fn region(&self, start: usize, length: usize) -> string::String {
 		let size = self.size();
 		let mut vec: Vec<u8> = Vec::with_capacity(size);
 		unsafe {
 			((**self.get_env().ptr).GetStringUTFRegion)(self.get_env().ptr, self.ptr, start as jsize, length as jsize, vec.as_mut_ptr() as *mut ::libc::c_char);
-			vec.set_len(length as uint);
+			vec.set_len(length as usize);
 		}
 
 		match string::String::from_utf8(vec) {
@@ -679,7 +679,7 @@ impl fmt::Show for JavaStringChars {
 impl JavaStringChars {
 	fn to_str(&self) -> string::String {
 		unsafe {
-			let cs = ::std::c_str::CString::new(self.chars, false);
+			let cs = ::std::ffi::CString::new(self.chars, false);
 			let s = cs.as_str();
 			match s {
 				None => "".to_string(),
@@ -744,7 +744,7 @@ impl<T> JObject for JavaArray<T> {
 		JavaArray{
 			env: env.clone(),
 			ptr: ptr as jarray,
-			rtype: Local
+			rtype: RefType::Local
 		}
 	}
 
@@ -753,7 +753,7 @@ impl<T> JObject for JavaArray<T> {
 		JavaArray{
 			env: env,
 			ptr: env.new_global_ref(self),
-			rtype: Global
+			rtype: RefType::Global
 		}
 	}
 
@@ -762,7 +762,7 @@ impl<T> JObject for JavaArray<T> {
 		JavaArray{
 			env: env,
 			ptr: env.new_weak_ref(self),
-			rtype: Weak
+			rtype: RefType::Weak
 		}
 	}
 }
