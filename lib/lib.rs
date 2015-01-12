@@ -3,13 +3,13 @@
 
 #![feature(unsafe_destructor)]
 #![allow(non_camel_case_types)]
-#![allow(raw_pointer_deriving)]
-#![allow(uppercase_variables)]
-#![allow(non_snake_case_functions)]
-#![allow(ctypes)]
+#![allow(raw_pointer_derive)]
+#![allow(non_snake_case)]
+#![allow(improper_ctypes)]
+#![allow(unstable)]
+#![allow(unused_attributes)]
 
 extern crate libc;
-// extern crate debug;
 
 pub use self::jni::*;
 pub use self::native::{JniVersion/*, JNI_VERSION_1_1, JNI_VERSION_1_2, JNI_VERSION_1_4, JNI_VERSION_1_6*/};

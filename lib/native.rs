@@ -44,6 +44,8 @@ pub enum jvalue {
 	Jl(jobject)
 }
 
+impl Copy for jvalue {}
+
 
 struct jfieldID_impl;
 pub type jfieldID = *mut jfieldID_impl;
@@ -54,7 +56,7 @@ pub type jmethodID = *mut jmethodID_impl;
 pub static JNI_FALSE: jboolean = 0;
 pub static JNI_TRUE: jboolean = 1;
 
-#[deriving(Show, Clone, FromPrimitive)]
+#[derive(Show, Clone, FromPrimitive)]
 #[repr(int)]
 pub enum JniVersion {
 	JNI_VERSION_1_1 = 0x00010001,
@@ -63,7 +65,9 @@ pub enum JniVersion {
 	JNI_VERSION_1_6 = 0x00010006
 }
 
-#[deriving(Show, Clone, PartialEq, Eq, FromPrimitive)]
+impl Copy for JniVersion {}
+
+#[derive(Show, Clone, PartialEq, Eq, FromPrimitive)]
 #[repr(int)]
 pub enum JniError {
 	JNI_OK =			0,			  /* success */
@@ -75,13 +79,17 @@ pub enum JniError {
 	JNI_EINVAL =	   -6			   /* invalid arguments */
 }
 
-#[deriving(Show, Clone, FromPrimitive)]
+impl Copy for JniError {}
+
+#[derive(Show, Clone, FromPrimitive)]
 #[repr(int)]
 pub enum JniReleaseArrayElementsMode {
 	JNI_ZERO = 0,
 	JNI_COMMIT = 1,
 	JNI_ABORT = 2
 }
+
+impl Copy for JniReleaseArrayElementsMode {}
 
 pub struct JNIInvokeInterface {
 	#[allow(dead_code)]
@@ -97,6 +105,8 @@ pub struct JNIInvokeInterface {
 	pub GetEnv: extern "C" fn(vm: *mut JavaVMImpl, penv: &mut *mut JNIEnvImpl, version: JniVersion) -> JniError,
 	pub AttachCurrentThreadAsDaemon: extern "C" fn(vm: *mut JavaVMImpl, penv: &mut *mut JNIEnvImpl, args: *mut JavaVMAttachArgsImpl) -> JniError
 }
+
+impl Copy for JNIInvokeInterface {}
 
 pub type JavaVMImpl = *mut JNIInvokeInterface;
 
@@ -384,6 +394,8 @@ pub struct JNINativeInterface {
 	pub GetObjectRefType:	extern "C" fn(env: *mut JNIEnvImpl, obj: jobject) -> jobjectRefType
 }
 
+impl Copy for JNINativeInterface {}
+
 pub type JNIEnvImpl = *const JNINativeInterface;
 
 
@@ -392,12 +404,14 @@ extern "C" {
 	pub fn JNI_CreateJavaVM(vm: *mut *mut JavaVMImpl, env: *mut *mut JNIEnvImpl, args: *mut JavaVMInitArgsImpl) -> JniError;
 }
 
-
+#[allow(dead_code)]
 pub struct JNINativeMethod {
 	name: *mut ::libc::c_char,
 	signature: *mut ::libc::c_char,
 	fnPtr: *mut jvoid
 }
+
+impl Copy for JNINativeMethod {}
 
 pub enum jobjectRefType {
 	JNIInvalidRefType = 0,
@@ -406,11 +420,15 @@ pub enum jobjectRefType {
 	JNIWeakGlobalRefType = 3
 }
 
+impl Copy for jobjectRefType {}
+
 
 pub struct JavaVMOptionImpl {
 	pub optionString: *const libc::c_char,
 	pub extraInfo: *const jvoid
 }
+
+impl Copy for JavaVMOptionImpl {}
 
 pub struct JavaVMInitArgsImpl {
 	pub version: JniVersion,
@@ -419,8 +437,12 @@ pub struct JavaVMInitArgsImpl {
 	pub ignoreUnrecognized: jboolean
 }
 
+impl Copy for JavaVMInitArgsImpl {}
+
 pub struct JavaVMAttachArgsImpl {
 	pub version: JniVersion,
-	pub name: *mut libc::c_char,
+	pub name: * const libc::c_char,
 	pub group: jobject
 }
+
+impl Copy for JavaVMAttachArgsImpl {}

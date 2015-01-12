@@ -1,5 +1,4 @@
 extern crate libc;
-// extern crate debug;
 
 use std::mem;
 use std::fmt;
@@ -9,7 +8,7 @@ use std::ffi::CString;
 use native::*;
 
 
-#[deriving(Clone)]
+#[derive(Show, Clone)]
 pub struct JavaVMOption {
 	pub optionString: string::String,
 	pub extraInfo: *const ::libc::c_void
@@ -24,14 +23,7 @@ impl JavaVMOption {
 	}
 }
 
-impl fmt::Show for JavaVMOption {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "JavaVMOption [ optionString: \"{}\", extraInfo: {} ]", self.optionString, self.extraInfo)
-	}
-}
-
-
-#[deriving(Show, Clone)]
+#[derive(Show, Clone)]
 pub struct JavaVMInitArgs {
 	pub version: JniVersion,
 	pub options: Vec<JavaVMOption>,
@@ -42,14 +34,14 @@ impl JavaVMInitArgs {
 	pub fn new(version: JniVersion, options: &[JavaVMOption], ignoreUnrecognized: bool) -> JavaVMInitArgs {
 		JavaVMInitArgs{
 			version: version,
-			options: options.to_owned(),
+			options: options.to_vec(),
 			ignoreUnrecognized: ignoreUnrecognized
 		}
 	}
 }
 
 
-#[deriving(Show)]
+#[derive(Show, Clone)]
 pub struct JavaVMAttachArgs {
 	pub version: JniVersion,
 	pub name: string::String,
@@ -67,7 +59,7 @@ impl JavaVMAttachArgs {
 }
 
 
-#[deriving(Clone)]
+#[derive(Show, Clone)]
 pub struct JavaVM {
 	ptr: *mut JavaVMImpl,
 	version: JniVersion,
@@ -104,10 +96,10 @@ impl JavaVM {
 			JniError::JNI_OK => JavaVM{
 				ptr: jvm,
 				version: args.version,
-				name: name.to_c_str(),
+				name: ::std::ffi::CString::from_slice(name.as_bytes()),
 				owned: true
 			},
-			_ => panic!("JNI_CreateJavaVM error: {}", res)
+			_ => panic!("JNI_CreateJavaVM error: {:?}", res)
 		}
 	}
 
@@ -115,7 +107,7 @@ impl JavaVM {
 		let mut res = JavaVM{
 			ptr: ptr,
 			version: JniVersion::JNI_VERSION_1_1,
-			name: "".to_c_str(),
+			name: ::std::ffi::CString::from_slice("".as_bytes()),
 			owned: false
 		};
 		res.version = res.get_env().version();
@@ -132,21 +124,21 @@ impl JavaVM {
 
 	pub fn get_env(&mut self) -> JavaEnv {
 		unsafe {
-			let mut jni = **self.ptr;
+			let jni = **self.ptr;
 			self.get_env_gen(jni.AttachCurrentThread)
 		}
 	}
 
 	pub fn get_env_daemon(&mut self) -> JavaEnv {
 		unsafe {
-			let mut jni = **self.ptr;
+			let jni = **self.ptr;
 			self.get_env_gen(jni.AttachCurrentThreadAsDaemon)
 		}
 	}
 
 	pub fn detach_current_thread(&mut self) -> bool {
 		unsafe {
-			let mut jni = **self.ptr;
+			let jni = **self.ptr;
 			(jni.DetachCurrentThread)(self.ptr) == JniError::JNI_OK
 		}
 	}
@@ -156,32 +148,25 @@ impl JavaVM {
 		let res = ((**self.ptr).GetEnv)(self.ptr, &mut env, self.version());
 		match res {
 			JniError::JNI_OK => JavaEnv {ptr: env},
-			JNI_EDETACHED => {
+			JniError::JNI_EDETACHED => {
 				let mut attachArgs = JavaVMAttachArgsImpl{
 					version: self.version(),
-					name: self.name.as_mut_ptr(),
+					name: self.name.as_ptr(),
 					group: 0 as jobject
 				};
 				let res = fun(self.ptr, &mut env, &mut attachArgs);
 				match res {
 					JniError::JNI_OK => JavaEnv {ptr: env},
-					_ => panic!("AttachCurrentThread error {}!", res)
+					_ => panic!("AttachCurrentThread error {:?}!", res)
 				}
 			},
-			JNI_EVERSION => panic!("Version {} is not supported by GetEnv!", self.version()),
-			_ => panic!("GetEnv error {}!", res)
+			JniError::JNI_EVERSION => panic!("Version {:?} is not supported by GetEnv!", self.version()),
+			_ => panic!("GetEnv error {:?}!", res)
 		}
 	}
 
 	unsafe fn destroy_java_vm(&self) -> bool {
 		((**self.ptr).DestroyJavaVM)(self.ptr) == JniError::JNI_OK
-	}
-}
-
-
-impl fmt::Show for JavaVM {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "JavaVM [ ptr: {} ]", self.ptr)
 	}
 }
 
@@ -195,16 +180,12 @@ impl Drop for JavaVM {
 	}
 }
 
-#[deriving(Clone)]
+#[derive(Show, Clone)]
 pub struct JavaEnv {
 	ptr: *mut JNIEnvImpl
 }
 
-impl fmt::Show for JavaEnv {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "JavaEnv [ ptr: {} ]", self.ptr)
-	}
-}
+impl Copy for JavaEnv {}
 
 impl JavaEnv {
 	pub fn version(&self) -> JniVersion {
@@ -220,16 +201,18 @@ impl JavaEnv {
 	pub fn define_class<T: JObject>(&self, name: &str, loader: &T, buf: &[u8], len: usize) -> JavaClass {
 		JObject::from(
 			self,
-			name.with_c_str(|name| unsafe {
-				((**self.ptr).DefineClass)(self.ptr, name, loader.get_obj(), buf.as_ptr() as *const jbyte, len as jsize)
-			}) as jobject
+			unsafe { ((**self.ptr).DefineClass)(
+				self.ptr,
+				name.as_ptr() as *const ::libc::c_char,
+				loader.get_obj(),
+				buf.as_ptr() as *const jbyte,
+				len as jsize
+			) } as jobject
 		)
 	}
 
 	pub fn find_class(&self, name: &str) -> Option<JavaClass> {
-		let ptr = name.with_c_str(|name| unsafe {
-			((**self.ptr).FindClass)(self.ptr, name)
-		});
+		let ptr = unsafe { ((**self.ptr).FindClass)(self.ptr, name.as_ptr() as *const ::libc::c_char) };
 
 		if ptr == (0 as jclass) {
 			None
@@ -258,9 +241,9 @@ impl JavaEnv {
 	}
 
 	pub fn throw_new(&self, clazz: &JavaClass, msg: &str) -> bool {
-		msg.with_c_str(|msg| unsafe {
-			((**self.ptr).ThrowNew)(self.ptr, clazz.ptr, msg) == JniError::JNI_OK
-		})
+		unsafe {
+			((**self.ptr).ThrowNew)(self.ptr, clazz.ptr, msg.as_ptr() as *const ::libc::c_char) == JniError::JNI_OK
+		}
 	}
 
 	pub fn exception_occured(&self) -> JavaThrowable {
@@ -285,9 +268,9 @@ impl JavaEnv {
 	}
 
 	pub fn fatal_error(&self, msg: &str) {
-		msg.with_c_str(|msg| unsafe {
-			((**self.ptr).FatalError)(self.ptr, msg)
-		})
+		unsafe {
+			((**self.ptr).FatalError)(self.ptr, msg.as_ptr() as *const ::libc::c_char) // TODO: remove odd cast
+		}
 	}
 
 	pub fn push_local_frame(&self, capacity: isize) -> bool {
@@ -389,12 +372,14 @@ impl JavaEnv {
 	}
 }
 
-#[deriving(Show)]
+#[derive(Show, Clone)]
 enum RefType {
 	Local,
 	Global,
 	Weak
 }
+
+impl Copy for RefType {}
 
 pub trait JObject: Drop + Clone {
 	fn get_env(&self) -> JavaEnv;
@@ -541,7 +526,7 @@ macro_rules! impl_jarray(
 
 
 
-#[deriving(Show)]
+#[derive(Show)]
 pub struct JavaObject {
 	env: JavaEnv,
 	ptr: jobject,
@@ -551,7 +536,7 @@ pub struct JavaObject {
 impl_jobject!(JavaObject, jobject);
 
 
-#[deriving(Show)]
+#[derive(Show)]
 pub struct JavaClass {
 	env: JavaEnv,
 	ptr: jclass,
@@ -571,14 +556,14 @@ impl JavaClass {
 
 	pub fn find(env: &JavaEnv, name: &str) -> JavaClass {
 		match env.find_class(name) {
-			None => panic!("Class \"{}\" not found!", name),
+			None => panic!("Class {:?} not found!", name),
 			Some(cls) => cls
 		}
 	}
 }
 
 
-#[deriving(Show)]
+#[derive(Show)]
 pub struct JavaThrowable {
 	env: JavaEnv,
 	ptr: jthrowable,
@@ -587,7 +572,7 @@ pub struct JavaThrowable {
 
 impl_jobject!(JavaThrowable, jthrowable);
 
-
+#[derive(Show)]
 pub struct JavaString {
 	env: JavaEnv,
 	ptr: jstring,
@@ -597,17 +582,11 @@ pub struct JavaString {
 impl_jobject!(JavaString, jstring);
 
 
-impl fmt::Show for JavaString {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "JavaString [ env: {}, ptr: {}, chars: {} ]", self.env, self.ptr, self.chars())
-	}
-}
-
 impl JavaString {
 	pub fn new(env: JavaEnv, val: &str) -> JavaString {
-		JObject::from(&env, val.with_c_str(|val| unsafe {
-			((**env.ptr).NewStringUTF)(env.ptr, val) as jobject
-		}))
+		JObject::from(&env, unsafe {
+			((**env.ptr).NewStringUTF)(env.ptr, val.as_ptr() as *const ::libc::c_char) as jobject
+		})
 	}
 
 	pub fn len(&self) -> usize {
@@ -679,12 +658,11 @@ impl fmt::Show for JavaStringChars {
 impl JavaStringChars {
 	fn to_str(&self) -> string::String {
 		unsafe {
-			let cs = ::std::ffi::CString::new(self.chars, false);
-			let s = cs.as_str();
-			match s {
-				None => "".to_string(),
-				Some(s) => s.to_string()
-			}
+			string::String::from_str(
+				::std::str::from_utf8_unchecked(
+					::std::ffi::c_str_to_bytes(&self.chars)
+				)
+			)
 		}
 	}
 }
@@ -770,7 +748,7 @@ impl<T> JObject for JavaArray<T> {
 
 unsafe fn JavaVMOptionImpl_new(opt: &::jni::JavaVMOption) -> JavaVMOptionImpl {
 	JavaVMOptionImpl{
-		optionString: opt.optionString.to_c_str().unwrap(),
+		optionString: opt.optionString.as_slice().as_ptr() as * const ::libc::c_char, // TOSO: remove odd cast
 		extraInfo: opt.extraInfo
 	}
 }
