@@ -8,7 +8,7 @@ use std::ffi::CString;
 use native::*;
 
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct JavaVMOption {
 	pub optionString: string::String,
 	pub extraInfo: *const ::libc::c_void
@@ -23,7 +23,7 @@ impl JavaVMOption {
 	}
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct JavaVMInitArgs {
 	pub version: JniVersion,
 	pub options: Vec<JavaVMOption>,
@@ -41,7 +41,7 @@ impl JavaVMInitArgs {
 }
 
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct JavaVMAttachArgs {
 	pub version: JniVersion,
 	pub name: string::String,
@@ -59,7 +59,7 @@ impl JavaVMAttachArgs {
 }
 
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct JavaVM {
 	ptr: *mut JavaVMImpl,
 	version: JniVersion,
@@ -180,7 +180,7 @@ impl Drop for JavaVM {
 	}
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 pub struct JavaEnv {
 	ptr: *mut JNIEnvImpl
 }
@@ -372,7 +372,7 @@ impl JavaEnv {
 	}
 }
 
-#[derive(Show, Clone)]
+#[derive(Debug, Clone)]
 enum RefType {
 	Local,
 	Global,
@@ -526,7 +526,7 @@ macro_rules! impl_jarray(
 
 
 
-#[derive(Show)]
+#[derive(Debug)]
 pub struct JavaObject {
 	env: JavaEnv,
 	ptr: jobject,
@@ -536,7 +536,7 @@ pub struct JavaObject {
 impl_jobject!(JavaObject, jobject);
 
 
-#[derive(Show)]
+#[derive(Debug)]
 pub struct JavaClass {
 	env: JavaEnv,
 	ptr: jclass,
@@ -563,7 +563,7 @@ impl JavaClass {
 }
 
 
-#[derive(Show)]
+#[derive(Debug)]
 pub struct JavaThrowable {
 	env: JavaEnv,
 	ptr: jthrowable,
@@ -572,7 +572,7 @@ pub struct JavaThrowable {
 
 impl_jobject!(JavaThrowable, jthrowable);
 
-#[derive(Show)]
+#[derive(Debug)]
 pub struct JavaString {
 	env: JavaEnv,
 	ptr: jstring,
@@ -649,7 +649,7 @@ impl Drop for JavaStringChars {
 	}
 }
 
-impl fmt::Show for JavaStringChars {
+impl fmt::Debug for JavaStringChars {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "\"{}\"", self.to_str())
 	}
@@ -667,7 +667,7 @@ impl JavaStringChars {
 	}
 }
 
-
+/*
 // For future
 trait JavaPrimitive {}
 
@@ -680,12 +680,13 @@ impl JavaPrimitive for jlong {}
 impl JavaPrimitive for jfloat {}
 impl JavaPrimitive for jdouble {}
 // impl JavaPrimitive for jsize {}
-
-
+*/
+use ::std::marker::PhantomData;
 pub struct JavaArray<T> {
 	env: JavaEnv,
 	ptr: jarray,
-	rtype: RefType
+	rtype: RefType,
+	phantom: PhantomData<T>,
 }
 
 #[unsafe_destructor]
@@ -700,7 +701,8 @@ impl<T> Clone for JavaArray<T> {
 		JavaArray{
 			env: self.get_env(),
 			ptr: self.inc_ref(),
-			rtype: self.rtype
+			rtype: self.rtype,
+			phantom: PhantomData::<T>,
 		}
 	}
 }
@@ -722,7 +724,8 @@ impl<T> JObject for JavaArray<T> {
 		JavaArray{
 			env: env.clone(),
 			ptr: ptr as jarray,
-			rtype: RefType::Local
+			rtype: RefType::Local,
+			phantom: PhantomData::<T>,
 		}
 	}
 
@@ -731,7 +734,8 @@ impl<T> JObject for JavaArray<T> {
 		JavaArray{
 			env: env,
 			ptr: env.new_global_ref(self),
-			rtype: RefType::Global
+			rtype: RefType::Global,
+			phantom: PhantomData::<T>,
 		}
 	}
 
@@ -740,7 +744,8 @@ impl<T> JObject for JavaArray<T> {
 		JavaArray{
 			env: env,
 			ptr: env.new_weak_ref(self),
-			rtype: RefType::Weak
+			rtype: RefType::Weak,
+			phantom: PhantomData::<T>,
 		}
 	}
 }
@@ -752,3 +757,6 @@ unsafe fn JavaVMOptionImpl_new(opt: &::jni::JavaVMOption) -> JavaVMOptionImpl {
 		extraInfo: opt.extraInfo
 	}
 }
+// vim: set noexpandtab:
+// vim: set tabstop=3:
+// vim: set shiftwidth=3:
