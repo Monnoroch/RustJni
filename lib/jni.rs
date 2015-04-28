@@ -7,7 +7,6 @@ use std::ffi::CString;
 
 use native::*;
 
-
 #[derive(Debug, Clone)]
 pub struct JavaVMOption {
 	pub optionString: string::String,
@@ -23,7 +22,7 @@ impl JavaVMOption {
 	}
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct JavaVMInitArgs {
 	pub version: JniVersion,
 	pub options: Vec<JavaVMOption>,
@@ -59,23 +58,31 @@ impl JavaVMAttachArgs {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct JavaVM {
 	ptr: *mut JavaVMImpl,
 	version: JniVersion,
-	name: CString,
-	owned: bool
+	name: Box<String>,
 }
 
 impl JavaVM {
 	pub fn new(args: JavaVMInitArgs, name: &str) -> JavaVM {
+		use std::borrow::ToOwned;
 		let (res, jvm) = unsafe {
 			let mut jvm: *mut JavaVMImpl = 0 as *mut JavaVMImpl;
 			let mut env: *mut JNIEnvImpl = 0 as *mut JNIEnvImpl;
 			let mut vm_opts = vec![];
+			let mut vm_opts_vect = vec![];
 			for opt in args.options.iter() {
-				vm_opts.push(JavaVMOptionImpl_new(opt));
+				let cstr:CString = CString::new(&opt.optionString[..]).unwrap();
+				vm_opts.push(
+					JavaVMOptionImpl {
+						optionString: cstr.as_ptr(),
+						extraInfo: opt.extraInfo
+					});
+				vm_opts_vect.push(cstr);
 			}
+
 			let mut argsImpl = JavaVMInitArgsImpl{
 				version: args.version,
 				nOptions: args.options.len() as jint,
@@ -85,10 +92,6 @@ impl JavaVM {
 
 			let res = JNI_CreateJavaVM(&mut jvm, &mut env, &mut argsImpl);
 
-			for &i in vm_opts.iter() {
-				libc::free(i.optionString as *mut libc::c_void);
-			}
-
 			(res, jvm)
 		};
 
@@ -96,24 +99,22 @@ impl JavaVM {
 			JniError::JNI_OK => JavaVM{
 				ptr: jvm,
 				version: args.version,
-				name: ::std::ffi::CString::from_slice(name.as_bytes()),
-				owned: true
+				name: Box::new(name[..].to_owned())
 			},
 			_ => panic!("JNI_CreateJavaVM error: {:?}", res)
 		}
 	}
-
+/*
 	pub fn from(ptr: *mut JavaVMImpl) -> JavaVM {
 		let mut res = JavaVM{
 			ptr: ptr,
 			version: JniVersion::JNI_VERSION_1_1,
-			name: ::std::ffi::CString::from_slice("".as_bytes()),
-			owned: false
+			name: Box::<String>::new(String.new()),
 		};
 		res.version = res.get_env().version();
 		res
 	}
-
+*/
 	pub fn ptr(&self) -> *mut JavaVMImpl {
 		self.ptr
 	}
@@ -151,7 +152,7 @@ impl JavaVM {
 			JniError::JNI_EDETACHED => {
 				let mut attachArgs = JavaVMAttachArgsImpl{
 					version: self.version(),
-					name: self.name.as_ptr(),
+					name: self.name.as_ptr() as *const libc::c_char,
 					group: 0 as jobject
 				};
 				let res = fun(self.ptr, &mut env, &mut attachArgs);
@@ -164,7 +165,7 @@ impl JavaVM {
 			_ => panic!("GetEnv error {:?}!", res)
 		}
 	}
-
+	
 	unsafe fn destroy_java_vm(&self) -> bool {
 		((**self.ptr).DestroyJavaVM)(self.ptr) == JniError::JNI_OK
 	}
@@ -172,10 +173,8 @@ impl JavaVM {
 
 impl Drop for JavaVM {
 	fn drop(&mut self) {
-		if self.owned {
-			unsafe {
-				self.destroy_java_vm();
-			}
+		unsafe {
+			self.destroy_java_vm();
 		}
 	}
 }
@@ -198,7 +197,7 @@ impl JavaEnv {
 		self.ptr
 	}
 
-	pub fn define_class<T: JObject>(&self, name: &str, loader: &T, buf: &[u8], len: usize) -> JavaClass {
+	pub fn define_class<T: JObject>(&self, name: &JavaChars, loader: &T, buf: &[u8], len: usize) -> JavaClass {
 		JObject::from(
 			self,
 			unsafe { ((**self.ptr).DefineClass)(
@@ -211,9 +210,11 @@ impl JavaEnv {
 		)
 	}
 
-	pub fn find_class(&self, name: &str) -> Option<JavaClass> {
-		let ptr = unsafe { ((**self.ptr).FindClass)(self.ptr, name.as_ptr() as *const ::libc::c_char) };
-
+	// Takes a string and returns a Java class if successfull.
+	// Returns `None` on failure.
+	pub fn find_class(&self, name: &JavaChars) -> Option<JavaClass> {
+		let ptr = unsafe { ((**self.ptr).FindClass)(
+			self.ptr, name.as_ptr()) };
 		if ptr == (0 as jclass) {
 			None
 		} else {
@@ -240,7 +241,7 @@ impl JavaEnv {
 		}
 	}
 
-	pub fn throw_new(&self, clazz: &JavaClass, msg: &str) -> bool {
+	pub fn throw_new(&self, clazz: &JavaClass, msg: &JavaChars) -> bool {
 		unsafe {
 			((**self.ptr).ThrowNew)(self.ptr, clazz.ptr, msg.as_ptr() as *const ::libc::c_char) == JniError::JNI_OK
 		}
@@ -267,9 +268,9 @@ impl JavaEnv {
 		}
 	}
 
-	pub fn fatal_error(&self, msg: &str) {
+	pub fn fatal_error(&self, msg: &JavaChars) {
 		unsafe {
-			((**self.ptr).FatalError)(self.ptr, msg.as_ptr() as *const ::libc::c_char) // TODO: remove odd cast
+			((**self.ptr).FatalError)(self.ptr, msg.as_ptr())
 		}
 	}
 
@@ -356,15 +357,15 @@ impl JavaEnv {
 			((**self.ptr).MonitorExit)(self.ptr, obj.get_obj()) == JniError::JNI_OK
 		}
 	}
-
-	pub fn jvm(&self) -> JavaVM {
+/*
+	pub fn jvm(&self) -> &mut JavaVM {
 		JavaVM::from(unsafe {
 			let mut jvm: *mut JavaVMImpl = 0 as *mut JavaVMImpl;
 			((**self.ptr).GetJavaVM)(self.ptr, &mut jvm);
 			jvm
 		})
 	}
-
+*/
 	pub fn exception_check(&self) -> bool {
 		unsafe {
 			((**self.ptr).ExceptionCheck)(self.ptr) != 0
@@ -467,6 +468,7 @@ macro_rules! impl_jobject(
 		impl_jobject_base!($cls);
 
 		impl JObject for $cls {
+
 			fn get_env(&self) -> JavaEnv {
 				self.env
 			}
@@ -513,13 +515,13 @@ macro_rules! impl_jarray(
 		impl_jobject!($cls, $native);
 
 		// impl $cls {
-		// 	pub fn as_jarray(&self) -> JavaArray {
-		// 		self.inc_ref();
-		// 		JavaArray {
-		// 			env: self.get_env(),
-		// 			ptr: self.ptr as jarray
-		// 		}
-		// 	}
+		//		pub fn as_jarray(&self) -> JavaArray {
+		//			self.inc_ref();
+		//			JavaArray {
+		//				env: self.get_env(),
+		//				ptr: self.ptr as jarray
+		//			}
+		//		}
 		// }
 	);
 );
@@ -554,7 +556,7 @@ impl JavaClass {
 		self.get_env().alloc_object(self)
 	}
 
-	pub fn find(env: &JavaEnv, name: &str) -> JavaClass {
+	pub fn find(env: &JavaEnv, name: &JavaChars) -> JavaClass {
 		match env.find_class(name) {
 			None => panic!("Class {:?} not found!", name),
 			Some(cls) => cls
@@ -581,11 +583,11 @@ pub struct JavaString {
 
 impl_jobject!(JavaString, jstring);
 
-
+use super::j_chars::JavaChars;
 impl JavaString {
-	pub fn new(env: JavaEnv, val: &str) -> JavaString {
+	pub fn new(env: JavaEnv, val: &super::j_chars::JavaChars) -> JavaString {
 		JObject::from(&env, unsafe {
-			((**env.ptr).NewStringUTF)(env.ptr, val.as_ptr() as *const ::libc::c_char) as jobject
+			((**env.ptr).NewStringUTF)(env.ptr, val.as_ptr()) as jobject
 		})
 	}
 
@@ -612,7 +614,6 @@ impl JavaString {
 		};
 		JavaStringChars{
 			s: self.clone(),
-			isCopy: isCopy != 0,
 			chars: val
 		}
 	}
@@ -635,19 +636,17 @@ impl JavaString {
 
 struct JavaStringChars {
 	s: JavaString,
-	isCopy: bool,
 	chars: *const ::libc::c_char
 }
 
 impl Drop for JavaStringChars {
-	fn drop(&mut self) {
-		if self.isCopy {
-			unsafe {
-				((**self.s.env.ptr).ReleaseStringUTFChars)(self.s.env.ptr, self.s.ptr, self.chars)
-			}
+  fn drop(&mut self) {
+		unsafe {
+			((**self.s.env.ptr).ReleaseStringUTFChars)(self.s.env.ptr, self.s.ptr, self.chars)
 		}
 	}
 }
+
 
 impl fmt::Debug for JavaStringChars {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -660,7 +659,7 @@ impl JavaStringChars {
 		unsafe {
 			string::String::from_str(
 				::std::str::from_utf8_unchecked(
-					::std::ffi::c_str_to_bytes(&self.chars)
+					::std::ffi::CStr::from_ptr(self.chars).to_bytes()
 				)
 			)
 		}
@@ -749,14 +748,23 @@ impl<T> JObject for JavaArray<T> {
 		}
 	}
 }
-
+/*
 
 unsafe fn JavaVMOptionImpl_new(opt: &::jni::JavaVMOption) -> JavaVMOptionImpl {
+	let cstring = CString::unchecked_from_bytes(opt.optionString[..].as_bytes());
 	JavaVMOptionImpl{
-		optionString: opt.optionString.as_slice().as_ptr() as * const ::libc::c_char, // TOSO: remove odd cast
+		optionString: cstring.as_ptr(),// opt.optionString[..].as_ptr() as * const ::libc::c_char, // TOSO: remove odd cast
 		extraInfo: opt.extraInfo
 	}
 }
+
+*/
 // vim: set noexpandtab:
-// vim: set tabstop=3:
-// vim: set shiftwidth=3:
+// vim: set tabstop=4:
+// vim: set shiftwidth=4:
+// Local Variables:
+// mode: rust
+// indent-tabs-mode: t
+// rust-indent-offset: 4
+// tab-width: 4
+// End:
