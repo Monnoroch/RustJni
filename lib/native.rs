@@ -1,6 +1,6 @@
 extern crate libc;
 
-
+#[repr(C)]
 pub type jvoid = ::libc::c_void;
 pub type jboolean = ::libc::c_uchar;
 pub type jbyte = ::libc::c_char;
@@ -56,8 +56,8 @@ pub type jmethodID = *mut jmethodID_impl;
 pub static JNI_FALSE: jboolean = 0;
 pub static JNI_TRUE: jboolean = 1;
 
-#[derive(Show, Clone, FromPrimitive)]
-#[repr(int)]
+#[derive(Debug, Clone)]
+#[repr(C)]
 pub enum JniVersion {
 	JNI_VERSION_1_1 = 0x00010001,
 	JNI_VERSION_1_2 = 0x00010002,
@@ -67,8 +67,8 @@ pub enum JniVersion {
 
 impl Copy for JniVersion {}
 
-#[derive(Show, Clone, PartialEq, Eq, FromPrimitive)]
-#[repr(int)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[repr(C)]
 pub enum JniError {
 	JNI_OK =			0,			  /* success */
 	JNI_ERR =		  -1,			  /* unknown error */
@@ -81,8 +81,8 @@ pub enum JniError {
 
 impl Copy for JniError {}
 
-#[derive(Show, Clone, FromPrimitive)]
-#[repr(int)]
+#[derive(Debug, Clone)]
+#[repr(C)]
 pub enum JniReleaseArrayElementsMode {
 	JNI_ZERO = 0,
 	JNI_COMMIT = 1,
@@ -91,6 +91,7 @@ pub enum JniReleaseArrayElementsMode {
 
 impl Copy for JniReleaseArrayElementsMode {}
 
+#[repr(C)]
 pub struct JNIInvokeInterface {
 	#[allow(dead_code)]
 	reserved0: *mut jvoid,
@@ -108,8 +109,10 @@ pub struct JNIInvokeInterface {
 
 impl Copy for JNIInvokeInterface {}
 
+#[repr(C)]
 pub type JavaVMImpl = *mut JNIInvokeInterface;
 
+#[repr(C)]
 pub struct JNINativeInterface {
 	#[allow(dead_code)]
 	reserved0: *mut jvoid,
@@ -120,11 +123,11 @@ pub struct JNINativeInterface {
 	#[allow(dead_code)]
 	reserved3: *mut jvoid,
 
-	pub GetVersion:		  extern "C" fn(env: *mut JNIEnvImpl) -> JniVersion,
+	pub GetVersion:		extern "C" fn(env: *mut JNIEnvImpl) -> JniVersion,
 
-	pub DefineClass:		 extern "C" fn(env: *mut JNIEnvImpl, name: *const ::libc::c_char, loader: jobject, buf: *const jbyte, len: jsize) -> jclass,
+	pub DefineClass:	extern "C" fn(env: *mut JNIEnvImpl, name: *const ::libc::c_char, loader: jobject, buf: *const jbyte, len: jsize) -> jclass,
 
-	pub FindClass:		   extern "C" fn(env: *mut JNIEnvImpl, name: *const ::libc::c_char) -> jclass,
+	pub FindClass:		extern "C" fn(env: *mut JNIEnvImpl, name: *const ::libc::c_char) -> jclass,
 
 	pub FromReflectedMethod: extern "C" fn(env: *mut JNIEnvImpl, method: jobject) -> jmethodID,
 
@@ -311,14 +314,18 @@ pub struct JNINativeInterface {
 
 	pub NewStringUTF:		extern "C" fn(env: *mut JNIEnvImpl, utf: *const ::libc::c_char) -> jstring,
 	pub GetStringUTFLength:  extern "C" fn(env: *mut JNIEnvImpl, strg: jstring) -> jsize,
-	pub GetStringUTFChars:   extern "C" fn(env: *mut JNIEnvImpl, strg: jstring, isCopy: *mut jboolean) -> *const ::libc::c_char,
+	pub GetStringUTFChars:   extern "C" fn(
+		env: *mut JNIEnvImpl, strg: jstring, isCopy: *mut jboolean) -> *const ::libc::c_char,
 	pub ReleaseStringUTFChars: extern "C" fn(env: *mut JNIEnvImpl, strg: jstring, chars: *const ::libc::c_char),
 
 	pub GetArrayLength:	  extern "C" fn(env: *mut JNIEnvImpl, array: jarray) -> jsize,
 
-	pub NewObjectArray:	  extern "C" fn(env: *mut JNIEnvImpl, len: jsize, clazz: jclass, init: jobject) -> jobjectArray,
-	pub GetObjectArrayElement: extern "C" fn(env: *mut JNIEnvImpl, array: jobjectArray, index: jsize) -> jobject,
-	pub SetObjectArrayElement: extern "C" fn(env: *mut JNIEnvImpl, array: jobjectArray, index: jsize, val: jobject),
+	pub NewObjectArray:	  extern "C" fn(
+		env: *mut JNIEnvImpl, len: jsize, clazz: jclass, init: jobject) -> jobjectArray,
+	pub GetObjectArrayElement: extern "C" fn(
+		env: *mut JNIEnvImpl, array: jobjectArray, index: jsize) -> jobject,
+	pub SetObjectArrayElement: extern "C" fn(
+		env: *mut JNIEnvImpl, array: jobjectArray, index: jsize, val: jobject),
 
 	pub NewBooleanArray:	 extern "C" fn(env: *mut JNIEnvImpl, len: jsize) -> jbooleanArray,
 	pub NewByteArray:		extern "C" fn(env: *mut JNIEnvImpl, len: jsize) -> jbyteArray,
@@ -329,12 +336,12 @@ pub struct JNINativeInterface {
 	pub NewFloatArray:	   extern "C" fn(env: *mut JNIEnvImpl, len: jsize) -> jfloatArray,
 	pub NewDoubleArray:	  extern "C" fn(env: *mut JNIEnvImpl, len: jsize) -> jdoubleArray,
 
-	pub GetBooleanArrayElements: extern "C" fn(env: *mut JNIEnvImpl, array: jbooleanArray, isCopy: *mut jboolean) -> *mut jboolean,
-	pub GetByteArrayElements:	extern "C" fn(env: *mut JNIEnvImpl, array: jbyteArray, isCopy: *mut jboolean) -> *mut jbyte,
-	pub GetCharArrayElements:	extern "C" fn(env: *mut JNIEnvImpl, array: jcharArray, isCopy: *mut jboolean) -> *mut jchar,
-	pub GetShortArrayElements:   extern "C" fn(env: *mut JNIEnvImpl, array: jshortArray, isCopy: *mut jboolean) -> *mut jshort,
-	pub GetIntArrayElements:	 extern "C" fn(env: *mut JNIEnvImpl, array: jintArray, isCopy: *mut jboolean) -> *mut jint,
-	pub GetLongArrayElements:	extern "C" fn(env: *mut JNIEnvImpl, array: jlongArray, isCopy: *mut jboolean) -> *mut jlong,
+	pub GetBooleanArrayElements:	extern "C" fn(env: *mut JNIEnvImpl, array: jbooleanArray,	isCopy: *mut jboolean) -> *mut jboolean,
+	pub GetByteArrayElements:		extern "C" fn(env: *mut JNIEnvImpl, array: jbyteArray, isCopy: *mut jboolean) -> *mut jbyte,
+	pub GetCharArrayElements:		extern "C" fn(env: *mut JNIEnvImpl, array: jcharArray, isCopy: *mut jboolean) -> *mut jchar,
+	pub GetShortArrayElements:		extern "C" fn(env: *mut JNIEnvImpl, array: jshortArray, isCopy: *mut jboolean) -> *mut jshort,
+	pub GetIntArrayElements:		extern "C" fn(env: *mut JNIEnvImpl, array: jintArray, isCopy: *mut jboolean) -> *mut jint,
+	pub GetLongArrayElements: extern "C" fn(env: *mut JNIEnvImpl, array: jlongArray, isCopy: *mut jboolean) -> *mut jlong,
 	pub GetFloatArrayElements:   extern "C" fn(env: *mut JNIEnvImpl, array: jfloatArray, isCopy: *mut jboolean) -> *mut jfloat,
 	pub GetDoubleArrayElements:  extern "C" fn(env: *mut JNIEnvImpl, array: jdoubleArray, isCopy: *mut jboolean) -> *mut jdouble,
 
@@ -373,14 +380,20 @@ pub struct JNINativeInterface {
 
 	pub GetJavaVM:		   extern "C" fn(env: *mut JNIEnvImpl, vm: *mut *mut JavaVMImpl) -> JniError,
 
-	pub GetStringRegion:	 extern "C" fn(env: *mut JNIEnvImpl, st: jstring, start: jsize, len: jsize, buf: *mut jchar),
-	pub GetStringUTFRegion:  extern "C" fn(env: *mut JNIEnvImpl, st: jstring, start: jsize, len: jsize, buf: *mut ::libc::c_char),
+	pub GetStringRegion:	 extern "C" fn(
+		env: *mut JNIEnvImpl, st: jstring, start: jsize, len: jsize, buf: *mut jchar),
+	pub GetStringUTFRegion:  extern "C" fn(
+		env: *mut JNIEnvImpl, st: jstring, start: jsize, len: jsize, buf: *mut ::libc::c_char),
 
-	pub GetPrimitiveArrayCritical:	 extern "C" fn(env: *mut JNIEnvImpl, array: jarray, isCopy: *mut jboolean),
-	pub ReleasePrimitiveArrayCritical: extern "C" fn(env: *mut JNIEnvImpl, array: jarray, carray: *mut jvoid, mode: JniReleaseArrayElementsMode),
+	pub GetPrimitiveArrayCritical:	 extern "C" fn(
+		env: *mut JNIEnvImpl, array: jarray, isCopy: *mut jboolean),
+	pub ReleasePrimitiveArrayCritical: extern "C" fn(
+		env: *mut JNIEnvImpl, array: jarray, carray: *mut jvoid, mode: JniReleaseArrayElementsMode),
 
-	pub GetStringCritical:	 extern "C" fn(env: *mut JNIEnvImpl, string: jstring, isCopy: *mut jboolean) -> *const jchar,
-	pub ReleaseStringCritical: extern "C" fn(env: *mut JNIEnvImpl, string: jstring, cstring: *const jchar),
+	pub GetStringCritical:	 extern "C" fn(
+		env: *mut JNIEnvImpl, string: jstring, isCopy: *mut jboolean) -> *const jchar,
+	pub ReleaseStringCritical: extern "C" fn(
+		env: *mut JNIEnvImpl, string: jstring, cstring: *const jchar),
 
 	pub NewWeakGlobalRef:	extern "C" fn(env: *mut JNIEnvImpl, rf: jobject) -> jweak,
 	pub DeleteWeakGlobalRef: extern "C" fn(env: *mut JNIEnvImpl, rf: jweak),
@@ -396,6 +409,7 @@ pub struct JNINativeInterface {
 
 impl Copy for JNINativeInterface {}
 
+#[repr(C)]
 pub type JNIEnvImpl = *const JNINativeInterface;
 
 
@@ -422,7 +436,7 @@ pub enum jobjectRefType {
 
 impl Copy for jobjectRefType {}
 
-
+#[repr(C)]
 pub struct JavaVMOptionImpl {
 	pub optionString: *const libc::c_char,
 	pub extraInfo: *const jvoid
@@ -430,12 +444,14 @@ pub struct JavaVMOptionImpl {
 
 impl Copy for JavaVMOptionImpl {}
 
+#[repr(C)]
 pub struct JavaVMInitArgsImpl {
 	pub version: JniVersion,
 	pub nOptions: jint,
 	pub options: *mut JavaVMOptionImpl,
 	pub ignoreUnrecognized: jboolean
 }
+
 
 impl Copy for JavaVMInitArgsImpl {}
 
@@ -446,3 +462,8 @@ pub struct JavaVMAttachArgsImpl {
 }
 
 impl Copy for JavaVMAttachArgsImpl {}
+// Local Variables:
+// indent-tabs-mode: t
+// tab-width: 4
+// rust-indent-offset: 4
+// End:
