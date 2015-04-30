@@ -9,7 +9,9 @@ use native::*;
 
 
 /// Stores an option for the JVM
+#[allow(raw_pointer_derive)]
 #[derive(Debug, Clone)]
+#[repr(C)]
 pub struct JavaVMOption {
 	/// The option to be passed to the JVM
 	pub optionString: string::String,
@@ -29,6 +31,7 @@ impl JavaVMOption {
 }
 
 /// Stores a vector of options to be passed to the JVM at JVM startup
+#[allow(raw_pointer_derive)]
 #[derive(Debug)]
 pub struct JavaVMInitArgs {
 
@@ -54,7 +57,6 @@ impl JavaVMInitArgs {
 		}
 	}
 }
-/*
 /// Stores a group of arguments for attaching to the JVM
 #[derive(Debug)]
 pub struct JavaVMAttachArgs<'a> {
@@ -72,8 +74,12 @@ impl<'a> JavaVMAttachArgs<'a> {
 		}
 	}
 }
-*/
 
+/// Represents a running JVM
+/// It is *not* permissible to use an `Env`
+/// to be used after the `JavaVM` instance corresponding to it
+/// has been destroyed. This is checked by the compiler.
+#[allow(raw_pointer_derive)]
 #[derive(Debug)]
 pub struct JavaVM {
 	ptr: *mut JavaVMImpl,
@@ -82,8 +88,10 @@ pub struct JavaVM {
 }
 
 impl JavaVM {
-	pub fn new(args: JavaVMInitArgs, name: &str) -> JavaVM {
-		use std::borrow::ToOwned;
+	/// Creates a Java Virtual Machine.
+	/// The JVM will automatically be destroyed when this class goes out of scope.
+	pub fn new(args: JavaVMInitArgs, name: &str) -> Result<JavaVM,JniError> {
+		use ::std::borrow::ToOwned;
 		let (res, jvm) = unsafe {
 			let mut jvm: *mut JavaVMImpl = 0 as *mut JavaVMImpl;
 			let mut env: *mut JNIEnvImpl = 0 as *mut JNIEnvImpl;
@@ -112,12 +120,12 @@ impl JavaVM {
 		};
 
 		match res {
-			JniError::JNI_OK => JavaVM{
+			JniError::JNI_OK => Ok(JavaVM{
 				ptr: jvm,
 				version: args.version,
 				name: Box::new(name[..].to_owned())
-			},
-			_ => panic!("JNI_CreateJavaVM error: {:?}", res)
+			}),
+			_ => Err(res)
 		}
 	}
 /*
@@ -164,7 +172,7 @@ impl JavaVM {
 		let mut env: *mut JNIEnvImpl = 0 as *mut JNIEnvImpl;
 		let res = ((**self.ptr).GetEnv)(self.ptr, &mut env, self.version());
 		match res {
-			JniError::JNI_OK => JavaEnv { ptr: env, phantom: PhantomData, },
+			JniError::JNI_OK => JavaEnv { ptr: &mut *env, phantom: PhantomData, },
 			JniError::JNI_EDETACHED => {
 				let mut attachArgs = JavaVMAttachArgsImpl{
 					version: self.version(),
@@ -173,7 +181,7 @@ impl JavaVM {
 				};
 				let res = fun(self.ptr, &mut env, &mut attachArgs);
 				match res {
-					JniError::JNI_OK => JavaEnv { ptr: env, phantom: PhantomData, },
+					JniError::JNI_OK => JavaEnv { ptr: &mut *env, phantom: PhantomData, },
 					_ => panic!("AttachCurrentThread error {:?}!", res)
 				}
 			},
@@ -195,13 +203,16 @@ impl Drop for JavaVM {
 	}
 }
 
+/// Represents an environment pointer used by the JNI.
+/// Serves as an upper bound to the lifetime of all local refs
+/// created by this binding.
+///
+/// TODO: allow for global/weak refs to outlive their env.
 #[derive(Debug, Clone)]
 pub struct JavaEnv<'a> {
 	ptr: *mut JNIEnvImpl,
 	phantom: PhantomData<&'a JavaVM>,
 }
-
-//impl Copy for JavaEnv {}
 
 impl<'a> JavaEnv<'a> {
 	pub fn version(&self) -> JniVersion {
@@ -390,14 +401,12 @@ impl<'a> JavaEnv<'a> {
 	}
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 enum RefType {
 	Local,
 	Global,
-	Weak
+	Weak,
 }
-
-impl Copy for RefType {}
 
 pub trait JObject<'a>: Drop {
 	fn get_env(&self) -> JavaEnv<'a>;
@@ -486,16 +495,16 @@ macro_rules! impl_jobject(
 		impl<'a> Drop for $cls<'a> {
 			fn drop(&mut self) {
 				let env = self.get_env();
-	            match self.ref_type() {
-			        RefType::Local => unsafe {
-				        ((**env.ptr).DeleteLocalRef)(env.ptr, self.get_obj())
-			        },
-			        RefType::Global => unsafe {
-				        ((**env.ptr).DeleteGlobalRef)(env.ptr, self.get_obj())
-			        },
-			        RefType::Weak => unsafe {
-				        ((**env.ptr).DeleteWeakGlobalRef)(env.ptr, self.get_obj())
-			        },
+				match self.ref_type() {
+					RefType::Local => unsafe {
+						((**env.ptr).DeleteLocalRef)(env.ptr, self.get_obj())
+					},
+					RefType::Global => unsafe {
+						((**env.ptr).DeleteGlobalRef)(env.ptr, self.get_obj())
+					},
+					RefType::Weak => unsafe {
+						((**env.ptr).DeleteWeakGlobalRef)(env.ptr, self.get_obj())
+					},
 				}
 			}
 		}
@@ -578,6 +587,8 @@ pub struct JavaObject<'a> {
 	rtype: RefType,
 }
 
+
+
 impl_jobject!(JavaObject, jobject);
 
 
@@ -585,7 +596,7 @@ impl_jobject!(JavaObject, jobject);
 pub struct JavaClass<'a> {
 	env: JavaEnv<'a>,
 	ptr: jclass,
-	rtype: RefType
+	rtype: RefType,
 }
 
 impl_jobject!(JavaClass, jclass);
@@ -615,7 +626,7 @@ impl<'a> JavaClass<'a> {
 pub struct JavaThrowable<'a> {
 	env: JavaEnv<'a>,
 	ptr: jthrowable,
-	rtype: RefType
+	rtype: RefType,
 }
 
 impl_jobject!(JavaThrowable, jthrowable);
@@ -624,7 +635,7 @@ impl_jobject!(JavaThrowable, jthrowable);
 pub struct JavaString<'a> {
 	env: JavaEnv<'a>,
 	ptr: jstring,
-	rtype: RefType
+	rtype: RefType,
 }
 
 impl_jobject!(JavaString, jstring);
@@ -649,7 +660,7 @@ impl<'a> JavaString<'a> {
 		}
 	}
 
-	pub fn to_str(&self) -> string::String {
+	pub fn to_str(&self) -> Option<string::String> {
 		let (chars, _) = self.chars();
 		chars.to_str()
 	}
@@ -667,13 +678,12 @@ impl<'a> JavaString<'a> {
 	}
 
 	pub fn region(&self, start: usize, length: usize) -> JavaChars {
-		let size = self.size();
-		let mut vec: Vec<u8> = Vec::with_capacity(size + 1);
+		let mut vec: Vec<u8> = Vec::with_capacity(length + 1);
 		unsafe {
 			((**self.get_env().ptr).GetStringUTFRegion)(self.get_env().ptr, self.ptr, start as jsize, length as jsize, vec.as_mut_ptr() as *mut ::libc::c_char);
-			vec.set_len(length as usize);
+			vec.set_len(length + 1);
 		}
-		vec[size] = 0;
+		vec[length] = 0;
 		unsafe {
 			JavaChars::from_raw_vec(vec)
 		}
@@ -699,19 +709,17 @@ impl<'a> Drop for JavaStringChars<'a> {
 
 impl<'a> fmt::Debug for JavaStringChars<'a> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "\"{}\"", self.to_str())
+		write!(f, "\"{:?}\"", self.to_str())
 	}
 }
 
 impl<'a> JavaStringChars<'a> {
-	fn to_str(&self) -> string::String {
+	fn to_str(&self) -> Option<string::String> {
 		unsafe {
-			string::String::from_str(
-				::std::str::from_utf8_unchecked(
-					::std::ffi::CStr::from_ptr(self.chars).to_bytes()
-				)
+			super::j_chars::JavaChars::from_raw_vec(
+				::std::ffi::CStr::from_ptr(self.chars).to_bytes_with_nul().to_vec()
 			)
-		}
+		}.to_string()
 	}
 }
 

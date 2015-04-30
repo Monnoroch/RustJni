@@ -4,10 +4,9 @@
 #![feature(unsafe_destructor)]
 #![feature(libc)]
 #![feature(std_misc)]
-#![feature(collections)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
-#![allow(unused_attributes)]
+#![forbid(improper_ctypes)]
 
 extern crate libc;
 

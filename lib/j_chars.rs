@@ -80,7 +80,6 @@ impl JavaChars {
 							let second_byte = (next_char2 >> 2) |
 								((high_byte & 0x3) << 4) | 0x80;
 							if self.contents[counter] != b'\xED' {
-								counter += 1;
 								// Not a surrogate
 								return None
 							}
@@ -128,7 +127,6 @@ impl JavaChars {
 	pub unsafe fn from_raw_vec (data: Vec<u8>) -> Self {
 		JavaChars { contents: data, }
 	}
-
 }
 // vim: set noexpandtab:
 // vim: set tabstop=4:

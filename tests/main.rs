@@ -11,11 +11,15 @@ fn main() {
 								0 as *const ::libc::c_void);
 	println!("Opt is {:?}", opt);
 
+	let opt2 = JavaVMOption::new("-ea",
+								0 as *const ::libc::c_void);
+	println!("Opt is {:?}", opt2);
+
 	let args = JavaVMInitArgs::new(
-		jni::JniVersion::JNI_VERSION_1_4, &[opt][..], false);
+		jni::JniVersion::JNI_VERSION_1_4, &[opt, opt2][..], false);
 	println!("Args is {:?}", args);
 
-	let mut jvm = JavaVM::new(args, "");
+	let mut jvm = JavaVM::new(args, "").unwrap();
 	let mut vec = Vec::new();
 
 	println!("Jvm is {:?}", &jvm);
@@ -25,14 +29,14 @@ fn main() {
 
 	println!("Version is {:?}", env.version());
 	let string_name = JavaChars::new("java/lang/String");
-	let cls = JavaClass::find(&env, &string_name);
+	let cls = JavaClass::find(&env, &string_name).unwrap();
 
 	let proto = JavaChars::new("Hello, world!");
 	let st = JavaString::new(&env, &proto);
-	println!("St is {:?}", st.to_str());
-	assert_eq!(st.to_str(), proto.to_string().unwrap());
+	println!("St is {:?}", st.to_str().unwrap());
+	assert_eq!(st.to_str(), proto.to_string());
 
-	println!("St len is {:?} == {:?}", st.to_str().len(),
+	println!("St len is {:?} == {:?}", st.to_str().unwrap().len(),
 			 proto.to_string().unwrap().len());
 
 	println!("Clses are {:?}, {:?}, {:?}, {:?}", cls,

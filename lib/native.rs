@@ -56,7 +56,8 @@ pub type jmethodID = *mut jmethodID_impl;
 pub static JNI_FALSE: jboolean = 0;
 pub static JNI_TRUE: jboolean = 1;
 
-#[derive(Debug, Clone)]
+/// The version of the JVM required
+#[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub enum JniVersion {
 	JNI_VERSION_1_1 = 0x00010001,
@@ -65,31 +66,25 @@ pub enum JniVersion {
 	JNI_VERSION_1_6 = 0x00010006
 }
 
-impl Copy for JniVersion {}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 #[repr(C)]
 pub enum JniError {
-	JNI_OK =			0,			  /* success */
-	JNI_ERR =		  -1,			  /* unknown error */
-	JNI_EDETACHED =	-2,			  /* thread detached from the VM */
-	JNI_EVERSION =	 -3,			  /* JNI version error */
-	JNI_ENOMEM =	   -4,			  /* not enough memory */
-	JNI_EEXIST =	   -5,			  /* VM already created */
-	JNI_EINVAL =	   -6			   /* invalid arguments */
+	JNI_OK          = 0,        /* success */
+	JNI_ERR         = -1,       /* unknown error */
+	JNI_EDETACHED   = -2,       /* thread detached from the VM */
+	JNI_EVERSION    = -3,       /* JNI version error */
+	JNI_ENOMEM      = -4,       /* not enough memory */
+	JNI_EEXIST      = -5,       /* VM already created */
+	JNI_EINVAL      = -6        /* invalid arguments */
 }
 
-impl Copy for JniError {}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub enum JniReleaseArrayElementsMode {
 	JNI_ZERO = 0,
 	JNI_COMMIT = 1,
 	JNI_ABORT = 2
 }
-
-impl Copy for JniReleaseArrayElementsMode {}
 
 #[repr(C)]
 pub struct JNIInvokeInterface {

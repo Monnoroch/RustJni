@@ -1,2 +1,5 @@
-export LD_LIBRARY_PATH="$JAVA_HOME/amd64/server/"
-./main
+#!/bin/sh
+cd ~/repos/RustJni
+export LD_LIBRARY_PATH="/usr/lib/jvm/java/jre/lib/amd64/server/" \
+       RUST_BACKTRACE=1
+exec ./main
