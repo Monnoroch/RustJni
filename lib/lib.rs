@@ -1,9 +1,6 @@
 #![crate_name = "jni"]
 #![crate_type = "rlib"]
 
-#![feature(unsafe_destructor)]
-#![feature(libc)]
-#![feature(std_misc)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 #![forbid(improper_ctypes)]

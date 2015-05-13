@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-#![feature(libc)]
 extern crate libc;
 extern crate jni;
 

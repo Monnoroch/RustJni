@@ -1,11 +1,9 @@
-extern crate libc;
+use ::std::mem;
+use ::std::fmt;
+use ::std::string;
+use ::std::ffi::CString;
 
-use std::mem;
-use std::fmt;
-use std::string;
-use std::ffi::CString;
-
-use native::*;
+use super::native::*;
 
 
 /// Stores an option for the JVM
@@ -139,7 +137,7 @@ impl JavaVM {
 		res
 	}
 */
-	pub fn ptr(&self) -> *mut JavaVMImpl {
+	fn ptr(&self) -> *mut JavaVMImpl {
 		self.ptr
 	}
 
@@ -149,21 +147,21 @@ impl JavaVM {
 
 	pub fn get_env(&mut self) -> JavaEnv {
 		unsafe {
-			let jni = **self.ptr;
+			let ref jni = **self.ptr;
 			self.get_env_gen(jni.AttachCurrentThread)
 		}
 	}
 
 	pub fn get_env_daemon(&mut self) -> JavaEnv {
 		unsafe {
-			let jni = **self.ptr;
+			let ref jni = **self.ptr;
 			self.get_env_gen(jni.AttachCurrentThreadAsDaemon)
 		}
 	}
 
 	pub fn detach_current_thread(&mut self) -> bool {
 		unsafe {
-			let jni = **self.ptr;
+			let ref jni = **self.ptr;
 			(jni.DetachCurrentThread)(self.ptr) == JniError::JNI_OK
 		}
 	}
@@ -176,7 +174,7 @@ impl JavaVM {
 			JniError::JNI_EDETACHED => {
 				let mut attachArgs = JavaVMAttachArgsImpl{
 					version: self.version(),
-					name: self.name.as_ptr() as *const libc::c_char,
+					name: self.name.as_ptr() as *const ::libc::c_char,
 					group: 0 as jobject
 				};
 				let res = fun(self.ptr, &mut env, &mut attachArgs);
@@ -189,7 +187,7 @@ impl JavaVM {
 			_ => panic!("GetEnv error {:?}!", res)
 		}
 	}
-	
+
 	unsafe fn destroy_java_vm(&self) -> bool {
 		((**self.ptr).DestroyJavaVM)(self.ptr) == JniError::JNI_OK
 	}
@@ -491,7 +489,6 @@ pub trait JArray<'a, T: 'a + JObject<'a>>: JObject<'a> {
 
 macro_rules! impl_jobject(
 	($cls:ident, $native:ident) => (
-		#[unsafe_destructor]
 		impl<'a> Drop for $cls<'a> {
 			fn drop(&mut self) {
 				let env = self.get_env();
@@ -508,7 +505,7 @@ macro_rules! impl_jobject(
 				}
 			}
 		}
-
+/*
 		impl<'a> $cls<'a> {
 			fn copy(&self) -> $cls {
 				$cls {
@@ -518,7 +515,7 @@ macro_rules! impl_jobject(
 				}
 			}
 		}
-
+*/
 		impl<'a> JObject<'a> for $cls<'a> {
 
 			fn get_env(&self) -> JavaEnv<'a> {
@@ -696,9 +693,8 @@ struct JavaStringChars<'a> {
 	chars: *const ::libc::c_char
 }
 
-#[unsafe_destructor]
 impl<'a> Drop for JavaStringChars<'a> {
-  fn drop(&mut self) {
+	fn drop(&mut self) {
 		unsafe {
 			((**self.s.env.ptr).ReleaseStringUTFChars)(self.s.env.ptr, self.s.ptr,
 													   self.chars)
@@ -745,7 +741,6 @@ pub struct JavaArray<'a, T: 'a + JObject<'a>> {
 	phantom: PhantomData<T>,
 }
 
-#[unsafe_destructor]
 impl<'a, T: 'a + JObject<'a>> Drop for JavaArray<'a, T> {
 	fn drop(&mut self) {
 		let env = self.get_env();
@@ -762,7 +757,7 @@ impl<'a, T: 'a + JObject<'a>> Drop for JavaArray<'a, T> {
 		}
 	}
 }
-
+/*
 impl<'a, T: 'a + JObject<'a>> JavaArray<'a,T> {
 	fn dup(&self) -> JavaArray<T> {
 		JavaArray{
@@ -773,7 +768,7 @@ impl<'a, T: 'a + JObject<'a>> JavaArray<'a,T> {
 		}
 	}
 }
-
+*/
 impl<'a, T: 'a + JObject<'a>> JObject<'a> for JavaArray<'a, T> {
 	fn get_env(&self) -> JavaEnv<'a> {
 		self.env.clone()

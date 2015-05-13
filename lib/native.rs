@@ -1,5 +1,3 @@
-extern crate libc;
-
 #[repr(C)]
 pub type jvoid = ::libc::c_void;
 pub type jboolean = ::libc::c_uchar;
@@ -32,6 +30,7 @@ pub type jweak = jobject;
 
 
 // TODO: deal with repr
+#[derive(Copy,Clone)]
 pub enum jvalue {
 	Jz(jboolean),
 	Jb(jbyte),
@@ -44,7 +43,6 @@ pub enum jvalue {
 	Jl(jobject)
 }
 
-impl Copy for jvalue {}
 
 
 struct jfieldID_impl;
@@ -85,7 +83,6 @@ pub enum JniReleaseArrayElementsMode {
 	JNI_COMMIT = 1,
 	JNI_ABORT = 2
 }
-
 #[repr(C)]
 pub struct JNIInvokeInterface {
 	#[allow(dead_code)]
@@ -102,12 +99,12 @@ pub struct JNIInvokeInterface {
 	pub AttachCurrentThreadAsDaemon: extern "C" fn(vm: *mut JavaVMImpl, penv: &mut *mut JNIEnvImpl, args: *mut JavaVMAttachArgsImpl) -> JniError
 }
 
-impl Copy for JNIInvokeInterface {}
-
 #[repr(C)]
 pub type JavaVMImpl = *mut JNIInvokeInterface;
 
 #[repr(C)]
+#[derive(Copy,Clone)]
+#[allow(raw_pointer_derive)]
 pub struct JNINativeInterface {
 	#[allow(dead_code)]
 	reserved0: *mut jvoid,
@@ -402,8 +399,6 @@ pub struct JNINativeInterface {
 	pub GetObjectRefType:	extern "C" fn(env: *mut JNIEnvImpl, obj: jobject) -> jobjectRefType
 }
 
-impl Copy for JNINativeInterface {}
-
 #[repr(C)]
 pub type JNIEnvImpl = *const JNINativeInterface;
 
@@ -420,8 +415,7 @@ pub struct JNINativeMethod {
 	fnPtr: *mut jvoid
 }
 
-impl Copy for JNINativeMethod {}
-
+#[derive(Copy,Clone)]
 pub enum jobjectRefType {
 	JNIInvalidRefType = 0,
 	JNILocalRefType = 1,
@@ -429,17 +423,15 @@ pub enum jobjectRefType {
 	JNIWeakGlobalRefType = 3
 }
 
-impl Copy for jobjectRefType {}
-
 #[repr(C)]
+#[derive(Copy,Clone)]
 pub struct JavaVMOptionImpl {
-	pub optionString: *const libc::c_char,
+	pub optionString: *const ::libc::c_char,
 	pub extraInfo: *const jvoid
 }
 
-impl Copy for JavaVMOptionImpl {}
-
 #[repr(C)]
+#[derive(Copy,Clone)]
 pub struct JavaVMInitArgsImpl {
 	pub version: JniVersion,
 	pub nOptions: jint,
@@ -447,16 +439,13 @@ pub struct JavaVMInitArgsImpl {
 	pub ignoreUnrecognized: jboolean
 }
 
-
-impl Copy for JavaVMInitArgsImpl {}
-
+#[derive(Copy,Clone)]
 pub struct JavaVMAttachArgsImpl {
 	pub version: JniVersion,
-	pub name: * const libc::c_char,
+	pub name: * const ::libc::c_char,
 	pub group: jobject
 }
 
-impl Copy for JavaVMAttachArgsImpl {}
 // Local Variables:
 // indent-tabs-mode: t
 // tab-width: 4
