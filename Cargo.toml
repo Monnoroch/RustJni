@@ -1,0 +1,17 @@
+[package]
+name = "RustJni"
+version = "0.1.0"
+authors = [
+    'Max Monnoroch <monnoroch@gmail.com>',
+    'Demetrios Obenour <demetriobenour@gmail.com>'
+]
+build = 'build.rs'
+license = "MIT"
+
+
+[lib]
+name = 'jni'
+path = 'lib/lib.rs'
+
+[dependencies]
+libc = "0.1.7"
