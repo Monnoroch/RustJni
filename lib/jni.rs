@@ -668,7 +668,7 @@ impl<'a> JavaString<'a> {
 			s: &self,
 			chars: unsafe {
 				((**self.get_env().ptr).GetStringUTFChars)(self.get_env().ptr,
-														   self.ptr, &mut isCopy)
+									   self.ptr, &mut isCopy)
 			}
 		};
 		(result, isCopy != 0)
@@ -677,7 +677,9 @@ impl<'a> JavaString<'a> {
 	pub fn region(&self, start: usize, length: usize) -> JavaChars {
 		let mut vec: Vec<u8> = Vec::with_capacity(length + 1);
 		unsafe {
-			((**self.get_env().ptr).GetStringUTFRegion)(self.get_env().ptr, self.ptr, start as jsize, length as jsize, vec.as_mut_ptr() as *mut ::libc::c_char);
+			((**self.get_env().ptr).GetStringUTFRegion)(
+                            self.get_env().ptr, self.ptr, start as jsize,
+                            length as jsize, vec.as_mut_ptr() as *mut ::libc::c_char);
 			vec.set_len(length + 1);
 		}
 		vec[length] = 0;
@@ -696,8 +698,8 @@ struct JavaStringChars<'a> {
 impl<'a> Drop for JavaStringChars<'a> {
 	fn drop(&mut self) {
 		unsafe {
-			((**self.s.env.ptr).ReleaseStringUTFChars)(self.s.env.ptr, self.s.ptr,
-													   self.chars)
+			((**self.s.env.ptr).ReleaseStringUTFChars)(
+                            self.s.env.ptr, self.s.ptr, self.chars)
 		}
 	}
 }
