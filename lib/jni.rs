@@ -822,12 +822,3 @@ unsafe fn JavaVMOptionImpl_new(opt: &::jni::JavaVMOption) -> JavaVMOptionImpl {
 }
 
 */
-// vim: set noexpandtab:
-// vim: set tabstop=4:
-// vim: set shiftwidth=4:
-// Local Variables:
-// mode: rust
-// indent-tabs-mode: t
-// rust-indent-offset: 4
-// tab-width: 4
-// End:
