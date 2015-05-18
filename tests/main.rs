@@ -4,21 +4,24 @@ extern crate jni;
 
 use jni::*;
 
-
+#[test]
+fn test () {
+    self::main()
+}
 fn main() {
 	let opt = JavaVMOption::new("-Xcheck:jni",
-								0 as *const ::libc::c_void);
+                                    0 as *const ::libc::c_void);
 	println!("Opt is {:?}", opt);
 
 	let opt2 = JavaVMOption::new("-ea",
-								0 as *const ::libc::c_void);
+				     0 as *const ::libc::c_void);
 	println!("Opt is {:?}", opt2);
 
 	let args = JavaVMInitArgs::new(
 		jni::JniVersion::JNI_VERSION_1_4, &[opt, opt2][..], false);
 	println!("Args is {:?}", args);
 
-	let mut jvm = JavaVM::new(args, "").unwrap();
+	let (mut jvm, cap) = JavaVM::new(args, "").unwrap();
 	let mut vec = Vec::new();
 
 	println!("Jvm is {:?}", &jvm);
@@ -55,15 +58,6 @@ fn main() {
 	println!("Wst is null: {:?}", wst.is_null());
 	vec.push(env.clone());
 
-	let java_chars = JavaChars::new("Hello, error!");
-	vec[0].fatal_error(&java_chars)
+	// let java_chars = JavaChars::new("Hello, error!");
+	// vec[0].fatal_error(&java_chars)
 }
-// vim: set noexpandtab:
-// vim: set tabstop=4:
-// vim: set shiftwidth=4:
-// Local Variables:
-// mode: rust
-// indent-tabs-mode: t
-// rust-indent-offset: 4
-// tab-width: 4
-// End:
