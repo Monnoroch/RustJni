@@ -118,9 +118,9 @@ pub struct JNINativeInterface {
 
     pub GetVersion:     	extern "C" fn(env: *mut JNIEnvImpl) -> JniVersion,
 
-    pub DefineClass:        extern "C" fn(env: *mut JNIEnvImpl, name: *const ::libc::c_char, loader: jobject, buf: *const jbyte, len: jsize) -> jclass,
+    pub DefineClass:        extern "C" fn(env: *mut JNIEnvImpl, name: *const ::libc::c_char, loader: jobject, buf: *const jbyte, len: jsize) -> jclass, // may throw
 
-    pub FindClass:          extern "C" fn(env: *mut JNIEnvImpl, name: *const ::libc::c_char) -> jclass,
+    pub FindClass:          extern "C" fn(env: *mut JNIEnvImpl, name: *const ::libc::c_char) -> jclass, // may throw
 
     pub FromReflectedMethod:extern "C" fn(env: *mut JNIEnvImpl, method: jobject) -> jmethodID,
 
@@ -134,8 +134,8 @@ pub struct JNINativeInterface {
 
     pub ToReflectedField:   extern "C" fn(env: *mut JNIEnvImpl, cls: jclass, fieldID: jfieldID, isStatic: jboolean) -> jobject,
 
-    pub Throw:              extern "C" fn(env: *mut JNIEnvImpl, obj: jthrowable) -> JniError,
-    pub ThrowNew:           extern "C" fn(env: *mut JNIEnvImpl, clazz: jclass, msg: *const ::libc::c_char) -> JniError,
+    pub Throw:              extern "C" fn(env: *mut JNIEnvImpl, obj: jthrowable) -> JniError, // throws
+    pub ThrowNew:           extern "C" fn(env: *mut JNIEnvImpl, clazz: jclass, msg: *const ::libc::c_char) -> JniError, // throws
     pub ExceptionOccurred:  extern "C" fn(env: *mut JNIEnvImpl) -> jthrowable,
     pub ExceptionDescribe:  extern "C" fn(env: *mut JNIEnvImpl),
     pub ExceptionClear:     extern "C" fn(env: *mut JNIEnvImpl),
@@ -149,8 +149,9 @@ pub struct JNINativeInterface {
     pub DeleteLocalRef:         extern "C" fn(env: *mut JNIEnvImpl, obj: jobject),
     pub IsSameObject:           extern "C" fn(env: *mut JNIEnvImpl, obj1: jobject, obj2: jobject) -> jboolean,
     pub NewLocalRef:            extern "C" fn(env: *mut JNIEnvImpl, lref: jobject) -> jobject,
-    pub EnsureLocalCapacity:    extern "C" fn(env: *mut JNIEnvImpl, capacity: jint) -> JniError,
+    pub EnsureLocalCapacity:    extern "C" fn(env: *mut JNIEnvImpl, capacity: jint) -> JniError, // may throw
 
+    /// These methods create objects. They can all throw
     pub AllocObject:    extern "C" fn(env: *mut JNIEnvImpl, clazz: jclass) -> jobject,
     pub NewObject:      extern "C" fn(env: *mut JNIEnvImpl, clazz: jclass, methodID: jmethodID, ...) -> jobject,
     pub NewObjectV:     extern "C" fn(env: *mut JNIEnvImpl, clazz: jclass, methodID: jmethodID, self::Empty) -> jobject,
@@ -159,8 +160,10 @@ pub struct JNINativeInterface {
     pub GetObjectClass: extern "C" fn(env: *mut JNIEnvImpl, obj: jobject) -> jclass,
     pub IsInstanceOf:   extern "C" fn(env: *mut JNIEnvImpl, obj: jobject, clazz: jclass) -> jboolean,
 
+    /// may throw
     pub GetMethodID:    extern "C" fn(env: *mut JNIEnvImpl, clazz: jclass, name: *const ::libc::c_char, sig: *const ::libc::c_char) -> jmethodID,
 
+    /// these all may throw
     pub CallObjectMethod:   extern "C" fn(env: *mut JNIEnvImpl, obj: jobject, methodID: jmethodID, ...) -> jobject,
     pub CallObjectMethodV:  extern "C" fn(env: *mut JNIEnvImpl, obj: jobject, methodID: jmethodID, args: self::Empty) -> jobject,
     pub CallObjectMethodA:  extern "C" fn(env: *mut JNIEnvImpl, obj: jobject, methodID: jmethodID, args: *const jvalue) -> jobject,
@@ -192,6 +195,7 @@ pub struct JNINativeInterface {
     pub CallVoidMethodV:    extern "C" fn(env: *mut JNIEnvImpl, obj: jobject, methodID: jmethodID, args: self::Empty),
     pub CallVoidMethodA:    extern "C" fn(env: *mut JNIEnvImpl, obj: jobject, methodID: jmethodID, args: *const jvalue),
 
+    /// these all may throw
     pub CallNonvirtualObjectMethod:     extern "C" fn(env: *mut JNIEnvImpl, obj: jobject, methodID: jmethodID, ...) -> jobject,
     pub CallNonvirtualObjectMethodV:    extern "C" fn(env: *mut JNIEnvImpl, obj: jobject, methodID: jmethodID, args: self::Empty) -> jobject,
     pub CallNonvirtualObjectMethodA:    extern "C" fn(env: *mut JNIEnvImpl, obj: jobject, methodID: jmethodID, args: *const jvalue) -> jobject,
@@ -223,6 +227,7 @@ pub struct JNINativeInterface {
     pub CallNonvirtualVoidMethodV:      extern "C" fn(env: *mut JNIEnvImpl, obj: jobject, methodID: jmethodID, args: self::Empty),
     pub CallNonvirtualVoidMethodA:      extern "C" fn(env: *mut JNIEnvImpl, obj: jobject, methodID: jmethodID, args: *const jvalue),
 
+    /// may throw
     pub GetFieldID:         extern "C" fn(env: *mut JNIEnvImpl, clazz: jclass, name: *const ::libc::c_char, sig: *const ::libc::c_char) -> jfieldID,
 
     pub GetObjectField:     extern "C" fn(env: *mut JNIEnvImpl, obj: jobject, fieldID: jfieldID) -> jobject,
@@ -245,8 +250,10 @@ pub struct JNINativeInterface {
     pub SetFloatField:      extern "C" fn(env: *mut JNIEnvImpl, obj: jobject, fieldID: jfieldID, val: jfloat),
     pub SetDoubleField:     extern "C" fn(env: *mut JNIEnvImpl, obj: jobject, fieldID: jfieldID, val: jdouble),
 
+    /// may throw
     pub GetStaticMethodID:  extern "C" fn(env: *mut JNIEnvImpl, clazz: jclass, name: *const ::libc::c_char, sig: *const ::libc::c_char) -> jmethodID,
 
+    /// these all may throw
     pub CallStaticObjectMethod:     extern "C" fn(env: *mut JNIEnvImpl, clazz: jclass, methodID: jmethodID, ...) -> jobject,
     pub CallStaticObjectMethodV:    extern "C" fn(env: *mut JNIEnvImpl, clazz: jclass, methodID: jmethodID, args: self::Empty) -> jobject,
     pub CallStaticObjectMethodA:    extern "C" fn(env: *mut JNIEnvImpl, clazz: jclass, methodID: jmethodID, args: *const jvalue) -> jobject,
@@ -278,6 +285,7 @@ pub struct JNINativeInterface {
     pub CallStaticVoidMethodV:      extern "C" fn(env: *mut JNIEnvImpl, clazz: jclass, methodID: jmethodID, args: self::Empty),
     pub CallStaticVoidMethodA:      extern "C" fn(env: *mut JNIEnvImpl, clazz: jclass, methodID: jmethodID, args: *const jvalue),
 
+    /// may throw
     pub GetStaticFieldID:   extern "C" fn(env: *mut JNIEnvImpl, clazz: jclass, name: *const ::libc::c_char, sig: *const ::libc::c_char) -> jfieldID,
 
     pub GetStaticObjectField:   extern "C" fn(env: *mut JNIEnvImpl, clazz: jclass, fieldID: jfieldID) -> jobject,
@@ -300,11 +308,13 @@ pub struct JNINativeInterface {
     pub SetStaticFloatField:    extern "C" fn(env: *mut JNIEnvImpl, clazz: jclass, fieldID: jfieldID, val: jfloat),
     pub SetStaticDoubleField:   extern "C" fn(env: *mut JNIEnvImpl, clazz: jclass, fieldID: jfieldID, val: jdouble),
 
+    /// may throw
     pub NewString:          extern "C" fn(env: *mut JNIEnvImpl, unicode: *const jchar, len: jsize) -> jstring,
     pub GetStringLength:    extern "C" fn(env: *mut JNIEnvImpl, strg: jstring) -> jsize,
     pub GetStringChars:     extern "C" fn(env: *mut JNIEnvImpl, strg: jstring, isCopy: *mut jboolean) -> *const jchar,
     pub ReleaseStringChars: extern "C" fn(env: *mut JNIEnvImpl, strg: jstring, chars: *const jchar),
 
+    /// may throw
     pub NewStringUTF:           extern "C" fn(env: *mut JNIEnvImpl, utf: *const ::libc::c_char) -> jstring,
     pub GetStringUTFLength:     extern "C" fn(env: *mut JNIEnvImpl, strg: jstring) -> jsize,
     pub GetStringUTFChars:      extern "C" fn(env: *mut JNIEnvImpl, strg: jstring, isCopy: *mut jboolean) -> *const ::libc::c_char,
@@ -312,6 +322,7 @@ pub struct JNINativeInterface {
 
     pub GetArrayLength:         extern "C" fn(env: *mut JNIEnvImpl, array: jarray) -> jsize,
 
+    /// these all may throw
     pub NewObjectArray:         extern "C" fn(env: *mut JNIEnvImpl, len: jsize, clazz: jclass, init: jobject) -> jobjectArray,
     pub GetObjectArrayElement:  extern "C" fn(env: *mut JNIEnvImpl, array: jobjectArray, index: jsize) -> jobject,
     pub SetObjectArrayElement:  extern "C" fn(env: *mut JNIEnvImpl, array: jobjectArray, index: jsize, val: jobject),
@@ -325,6 +336,7 @@ pub struct JNINativeInterface {
     pub NewFloatArray:      extern "C" fn(env: *mut JNIEnvImpl, len: jsize) -> jfloatArray,
     pub NewDoubleArray:     extern "C" fn(env: *mut JNIEnvImpl, len: jsize) -> jdoubleArray,
 
+    /// these all may throw
     pub GetBooleanArrayElements:    extern "C" fn(env: *mut JNIEnvImpl, array: jbooleanArray,   isCopy: *mut jboolean) -> *mut jboolean,
     pub GetByteArrayElements:       extern "C" fn(env: *mut JNIEnvImpl, array: jbyteArray, isCopy: *mut jboolean) -> *mut jbyte,
     pub GetCharArrayElements:       extern "C" fn(env: *mut JNIEnvImpl, array: jcharArray, isCopy: *mut jboolean) -> *mut jchar,
@@ -343,6 +355,7 @@ pub struct JNINativeInterface {
     pub ReleaseFloatArrayElements:      extern "C" fn(env: *mut JNIEnvImpl, array: jfloatArray, elems: *mut jfloat, mode: JniReleaseArrayElementsMode),
     pub ReleaseDoubleArrayElements:     extern "C" fn(env: *mut JNIEnvImpl, array: jdoubleArray, elems: *mut jdouble, mode: JniReleaseArrayElementsMode),
 
+    /// these all may throw
     pub GetBooleanArrayRegion:  extern "C" fn(env: *mut JNIEnvImpl, array: jbooleanArray, start: jsize, l: jsize, buf: *mut jboolean),
     pub GetByteArrayRegion:     extern "C" fn(env: *mut JNIEnvImpl, array: jbyteArray, start: jsize, l: jsize, buf: *mut jbyte),
     pub GetCharArrayRegion:     extern "C" fn(env: *mut JNIEnvImpl, array: jcharArray, start: jsize, l: jsize, buf: *mut jchar),
@@ -352,6 +365,7 @@ pub struct JNINativeInterface {
     pub GetFloatArrayRegion:    extern "C" fn(env: *mut JNIEnvImpl, array: jfloatArray, start: jsize, l: jsize, buf: *mut jfloat),
     pub GetDoubleArrayRegion:   extern "C" fn(env: *mut JNIEnvImpl, array: jdoubleArray, start: jsize, l: jsize, buf: *mut jdouble),
 
+    /// these all may throw
     pub SetBooleanArrayRegion:  extern "C" fn(env: *mut JNIEnvImpl, array: jbooleanArray, start: jsize, l: jsize, buf: *const jboolean),
     pub SetByteArrayRegion:     extern "C" fn(env: *mut JNIEnvImpl, array: jbyteArray, start: jsize, l: jsize, buf: *const jbyte),
     pub SetCharArrayRegion:     extern "C" fn(env: *mut JNIEnvImpl, array: jcharArray, start: jsize, l: jsize, buf: *const jchar),
@@ -369,12 +383,15 @@ pub struct JNINativeInterface {
 
     pub GetJavaVM:  extern "C" fn(env: *mut JNIEnvImpl, vm: *mut *mut JavaVMImpl) -> JniError,
 
+    /// may throw
     pub GetStringRegion:    extern "C" fn(env: *mut JNIEnvImpl, st: jstring, start: jsize, len: jsize, buf: *mut jchar),
     pub GetStringUTFRegion: extern "C" fn(env: *mut JNIEnvImpl, st: jstring, start: jsize, len: jsize, buf: *mut ::libc::c_char),
 
+    /// may throw
     pub GetPrimitiveArrayCritical:      extern "C" fn(env: *mut JNIEnvImpl, array: jarray, isCopy: *mut jboolean),
     pub ReleasePrimitiveArrayCritical:  extern "C" fn(env: *mut JNIEnvImpl, array: jarray, carray: *mut jvoid, mode: JniReleaseArrayElementsMode),
 
+    /// these all may throw
     pub GetStringCritical:      extern "C" fn(env: *mut JNIEnvImpl, string: jstring, isCopy: *mut jboolean) -> *const jchar,
     pub ReleaseStringCritical:  extern "C" fn(env: *mut JNIEnvImpl, string: jstring, cstring: *const jchar),
 
@@ -415,14 +432,12 @@ pub enum jobjectRefType {
 }
 
 #[repr(C)]
-#[derive(Copy,Clone)]
 pub struct JavaVMOptionImpl {
     pub optionString: *const ::libc::c_char,
     pub extraInfo: *const jvoid
 }
 
 #[repr(C)]
-#[derive(Copy,Clone)]
 pub struct JavaVMInitArgsImpl {
     pub version: JniVersion,
     pub nOptions: jint,

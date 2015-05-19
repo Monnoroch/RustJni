@@ -5,29 +5,29 @@ pub struct JavaChars {
 
 impl JavaChars {
     pub fn new(value: &str) -> JavaChars {
-        let mut vector:Vec<u8> = vec![];
+        let mut vector:Vec<u8> = Vec::with_capacity(2 * value.len());
         for i in value.chars() {
-            let j:i32 = i as i32;
+            let j = i as u32;
             match i {
                 '\0' | '\u{80}' ... '\u{7FF}' => {
-                    vector.push(b'\xC0' | (j >> 6) as u8);
-                    vector.push(0x80|(0x3F & j) as u8)
+                    vector.push((0xC0 | j >> 6) as u8);
+                    vector.push((0x80 | 0x3F & j) as u8)
                 }
                 '\u{1}' ... '\u{7F}' => vector.push(i as u8),
                 '\u{800}' ... '\u{FFFF}' => {
-                    vector.push(b'\xE0' | (j >> 12) as u8);
-                    vector.push(0x80 | (0x3F & (j >> 6)) as u8);
-                    vector.push(0x80 | (0x3F & j) as u8)
+                    vector.push((0xE0 | j >> 12) as u8);
+                    vector.push((0x80 | 0x3F & j >> 6) as u8);
+                    vector.push((0x80 | 0x3F & j) as u8)
                 }
                 '\u{10000}' ... '\u{10FFFF}' => {
                     let subchar = j - 0x10000;
                     vector.push(0b11101101);
-                    vector.push(0b10100000 | (subchar >> 16) as u8);
-                    vector.push(0b10000000 | (0x3F & (subchar >> 10)) as u8);
+                    vector.push((0b10100000 | subchar >> 16) as u8);
+                    vector.push((0b10000000 | 0x3F & subchar >> 10) as u8);
                     vector.push(0b11101101);
                     vector.push(0b11101101);
-                    vector.push(0b10100000 | (0x0F & (subchar >> 6)) as u8);
-                    vector.push(0b10000000 | (0x3F & subchar) as u8);
+                    vector.push((0b10100000 | 0x0F & subchar >> 6) as u8);
+                    vector.push((0b10000000 | 0x3F & subchar) as u8)
                 }
                 _ => unreachable!()
             }
@@ -41,16 +41,16 @@ impl JavaChars {
         loop {
             let i = self.contents[counter];
             counter += 1;
-            match i {
+            match i as u8 {
                 b'\x00' => unsafe {
                     return Some(String::from_utf8_unchecked(a))
                 },
-                b'\x01' ... b'\x7F' => a.push(i),
+                b'\x01' ... b'\x7F' => a.push(i as u8),
                 b'\xC0' => {
                     let j = self.contents[counter];
                     counter += 1;
-                    if j == b'\x80' {
-                        a.push(b'\0');
+                    if j == 0x80 {
+                        a.push(0);
                     } else {
                         a.push(i);
                         a.push(j)
@@ -62,7 +62,7 @@ impl JavaChars {
                     counter += 1
                 }
                 b'\xED' => {
-                    let next_char: u8 = self.contents[counter];
+                    let next_char = self.contents[counter];
                     counter += 1;
                     if next_char & 0xE0 == 0xA0 {
                         // Surrogate char
@@ -73,13 +73,13 @@ impl JavaChars {
                             // The high byte
                             let high_byte = 0xF1 + (next_char >> 2);
 
-                            let next_char2:u8 =
+                            let next_char2 =
                                 self.contents[counter] & 0x0F;
                             counter += 1;
 
                             let second_byte = (next_char2 >> 2) |
-                                ((high_byte & 0x3) << 4) | 0x80;
-                            if self.contents[counter] != b'\xED' {
+                            ((high_byte & 0x3) << 4) | 0x80;
+                            if self.contents[counter] != 0xED {
                                 // Not a surrogate
                                 return None
                             }
