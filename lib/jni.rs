@@ -89,11 +89,38 @@ pub struct JavaVMOption {
 
 impl JavaVMOption {
 	/// Constructs a new `JavaVMOption`
-	pub fn new(option: &str, extra: *const ::libc::c_void) -> JavaVMOption {
+	pub fn new(option: &str) -> JavaVMOption {
+		return Self::new_extra(option, 0 as *const ::libc::c_void)
+	}
+
+	/// Constructs a new `JavaVMOption` with extra info.
+	pub fn new_extra(option: &str, extra: *const ::libc::c_void) -> JavaVMOption {
 		JavaVMOption{
 			optionString: option.to_string(),
 			extraInfo: extra,
 		}
+	}
+}
+
+impl<'a> PartialEq<&'a str> for JavaVMOption {
+	fn eq(&self, other: &&'a str) -> bool {
+		*other == self.optionString
+	}
+}
+
+impl<'a> PartialEq<JavaVMOption> for &'a str {
+	fn eq(&self, other: &JavaVMOption) -> bool {
+		other.optionString == *self
+	}
+}
+
+#[test]
+fn test_JavaVMOption() {
+	for s in &["", "-Xcheck:jni"] {
+		let opt = JavaVMOption::new(s);
+		assert!(opt.extraInfo == 0 as *const ::libc::c_void);
+		assert!(opt.optionString == *s);
+		assert!(opt == *s);
 	}
 }
 
@@ -123,6 +150,26 @@ impl JavaVMInitArgs {
 			ignoreUnrecognized: ignoreUnrecognized
 		}
 	}
+}
+
+impl<'a> PartialEq<Vec<&'a str>> for JavaVMInitArgs {
+	fn eq(&self, other: &Vec<&'a str>) -> bool {
+		*other == self.options
+	}
+}
+
+#[test]
+fn test_JavaVMInitArgs() {
+	let args = JavaVMInitArgs::new(
+		JniVersion::JNI_VERSION_1_4,
+		&[JavaVMOption::new("-Xcheck:jni"), JavaVMOption::new("-ea")],
+		false
+	);
+	assert!(!args.ignoreUnrecognized);
+	assert!(args.version == JniVersion::JNI_VERSION_1_4);
+	assert!(args.options.len() == 2);
+	assert!(args.options[0] == "-Xcheck:jni");
+	assert!(args.options == ["-Xcheck:jni", "-ea"]);
 }
 
 
