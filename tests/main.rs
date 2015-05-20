@@ -8,17 +8,15 @@ use std::result::Result;
 
 #[test]
 fn test () {
-    let _ = self::mytest();
+    // let _ = self::mytest();
 }
 
 
 fn mytest() -> Result<(),jni::Exception> {
-    let opt = JavaVMOption::new("-Xcheck:jni",
-                                0 as *const ::libc::c_void);
+    let opt = JavaVMOption::new("-Xcheck:jni");
     println!("Opt is {:?}", opt);
 
-    let opt2 = JavaVMOption::new("-ea",
-                                 0 as *const ::libc::c_void);
+    let opt2 = JavaVMOption::new("-ea");
     println!("Opt is {:?}", opt2);
 
     let args = JavaVMInitArgs::new(
