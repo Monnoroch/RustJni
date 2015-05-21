@@ -40,7 +40,7 @@ pub enum jvalue {
 	Jj(jlong),
 	Jf(jfloat),
 	Jd(jdouble),
-	Jl(jobject)
+	Jl(jobject),
 }
 
 
@@ -55,13 +55,15 @@ pub static JNI_FALSE: jboolean = 0;
 pub static JNI_TRUE: jboolean = 1;
 
 /// The version of the JVM required
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(C)]
 pub enum JniVersion {
 	JNI_VERSION_1_1 = 0x00010001,
 	JNI_VERSION_1_2 = 0x00010002,
 	JNI_VERSION_1_4 = 0x00010004,
-	JNI_VERSION_1_6 = 0x00010006
+	JNI_VERSION_1_6 = 0x00010006,
+	JNI_VERSION_1_7 = 0x00010007,
+	JNI_VERSION_1_8 = 0x00010008,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
@@ -73,7 +75,7 @@ pub enum JniError {
 	JNI_EVERSION    = -3,       /* JNI version error */
 	JNI_ENOMEM      = -4,       /* not enough memory */
 	JNI_EEXIST      = -5,       /* VM already created */
-	JNI_EINVAL      = -6        /* invalid arguments */
+	JNI_EINVAL      = -6,       /* invalid arguments */
 }
 
 pub enum Empty {}
@@ -83,7 +85,7 @@ pub enum Empty {}
 pub enum JniReleaseArrayElementsMode {
 	JNI_ZERO = 0,
 	JNI_COMMIT = 1,
-	JNI_ABORT = 2
+	JNI_ABORT = 2,
 }
 
 #[repr(C)]
@@ -429,7 +431,7 @@ pub enum jobjectRefType {
 	JNIInvalidRefType = 0,
 	JNILocalRefType = 1,
 	JNIGlobalRefType = 2,
-	JNIWeakGlobalRefType = 3
+	JNIWeakGlobalRefType = 3,
 }
 
 #[repr(C)]

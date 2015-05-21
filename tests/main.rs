@@ -3,34 +3,41 @@ extern crate libc;
 extern crate jni;
 
 use jni::*;
-use std::result::Result;
-
 
 #[test]
-fn test () {
-    // let _ = self::mytest();
+fn test() {
+    assert!(!mytest().is_err());
 }
 
-
 fn mytest() -> Result<(),jni::Exception> {
-    let opt = JavaVMOption::new("-Xcheck:jni");
-    println!("Opt is {:?}", opt);
+    let opt1 = JavaVMOption::new("-Xcheck:jni");
+    println!("Opt is {:?}", opt1);
 
-    let opt2 = JavaVMOption::new("-ea");
+    let opt2 = JavaVMOption::new("-verbose:jni");
     println!("Opt is {:?}", opt2);
 
     let args = JavaVMInitArgs::new(
-        jni::JniVersion::JNI_VERSION_1_4, &[opt, opt2][..], false);
-    println!("Args is {:?}", args);
+        jni::JniVersion::JNI_VERSION_1_4,
+        &[opt1, JavaVMOption::new("-verbose:jni"),][..],
+        false,
+    );
+    println!("Args are {:?}", args);
 
-    let (mut jvm, cap) = JavaVM::new(args, "").unwrap();
+    let mut t = JavaVM::new(args, "");
+    assert!(!t.is_err());
+
+    let (mut jvm, cap) = t.unwrap();
+    println!("Jvm is {:?}", jvm);
+
+    let t = jvm.get_env();
+    assert!(!t.is_err());
+
+    let env = t.unwrap();
+    println!("Env is {:?}", env);
+    println!("Env version is {:?}", env.version(&cap));
+
     let mut vec = Vec::new();
 
-    println!("Jvm is {:?}", &jvm);
-
-    let env = jvm.get_env();
-    println!("Env is {:?}", &env);
-    println!("Version is {:?}", env.version(&cap));
     let string_name = JavaChars::new("java/lang/String");
     let (cls, cap) = match JavaClass::find(&env, &string_name, cap) { Ok(a) => a, _ => panic!("unexpected exception") };
 
@@ -59,7 +66,4 @@ fn mytest() -> Result<(),jni::Exception> {
              wgst);
     println!("Wst is null: {:?}", wst.is_null());
     Ok(vec.push(env.clone()))
-
-        // let java_chars = JavaChars::new("Hello, error!");
-        // vec[0].fatal_error(&java_chars)
 }

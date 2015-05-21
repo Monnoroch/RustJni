@@ -42,6 +42,7 @@ use ::std::mem;
 use ::std::fmt;
 use ::std::string;
 use ::std::ffi::CString;
+use ::std::marker::PhantomData;
 
 use super::native::*;
 
@@ -65,6 +66,12 @@ pub struct Capability {
 	_cap: ()
 }
 
+impl Capability {
+	pub fn new() -> Capability {
+		Capability { _cap: () }
+	}
+}
+
 /// A token that indicates that their is an exception pending in the
 /// current thread.
 ///
@@ -72,6 +79,12 @@ pub struct Capability {
 /// clearing the exception.
 pub struct Exception {
 	_cap: ()
+}
+
+impl Exception {
+	pub fn new() -> Exception {
+		Exception { _cap: () }
+	}
 }
 
 
@@ -114,21 +127,10 @@ impl<'a> PartialEq<JavaVMOption> for &'a str {
 	}
 }
 
-#[test]
-fn test_JavaVMOption() {
-	for s in &["", "-Xcheck:jni"] {
-		let opt = JavaVMOption::new(s);
-		assert!(opt.extraInfo == 0 as *const ::libc::c_void);
-		assert!(opt.optionString == *s);
-		assert!(opt == *s);
-	}
-}
-
 /// Stores a vector of options to be passed to the JVM at JVM startup
 #[allow(raw_pointer_derive)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JavaVMInitArgs {
-
 	/// The JVM version required
 	pub version: JniVersion,
 
@@ -152,32 +154,11 @@ impl JavaVMInitArgs {
 	}
 }
 
-impl<'a> PartialEq<Vec<&'a str>> for JavaVMInitArgs {
-	fn eq(&self, other: &Vec<&'a str>) -> bool {
-		*other == self.options
-	}
-}
-
-#[test]
-fn test_JavaVMInitArgs() {
-	let args = JavaVMInitArgs::new(
-		JniVersion::JNI_VERSION_1_4,
-		&[JavaVMOption::new("-Xcheck:jni"), JavaVMOption::new("-ea")],
-		false
-	);
-	assert!(!args.ignoreUnrecognized);
-	assert!(args.version == JniVersion::JNI_VERSION_1_4);
-	assert!(args.options.len() == 2);
-	assert!(args.options[0] == "-Xcheck:jni");
-	assert!(args.options == ["-Xcheck:jni", "-ea"]);
-}
-
-
 /// Stores a group of arguments for attaching to the JVM
 #[derive(Debug)]
 pub struct JavaVMAttachArgs<'a> {
 	pub version: JniVersion,
-	pub name: string::String,
+	pub name: String,
 	pub group: JavaObject<'a>,
 }
 
@@ -200,13 +181,13 @@ impl<'a> JavaVMAttachArgs<'a> {
 pub struct JavaVM {
 	ptr: *mut JavaVMImpl,
 	version: JniVersion,
-	name: Box<String>,
+	name: String,
 }
 
 impl JavaVM {
 	/// Creates a Java Virtual Machine.
-	/// The JVM will automatically be destroyed when this class goes out of scope.
-	pub fn new(args: JavaVMInitArgs, name: &str) -> Result<(JavaVM, Capability),JniError> {
+	/// The JVM will automatically be destroyed when the object goes out of scope.
+	pub fn new(args: JavaVMInitArgs, name: &str) -> Result<(JavaVM, Capability), JniError> {
 		use ::std::borrow::ToOwned;
 		let (res, jvm) = unsafe {
 			let mut jvm: *mut JavaVMImpl = 0 as *mut JavaVMImpl;
@@ -214,12 +195,13 @@ impl JavaVM {
 			let mut vm_opts = vec![];
 			let mut vm_opts_vect = vec![];
 			for opt in args.options.iter() {
-				let cstr:CString = CString::new(&opt.optionString[..]).unwrap();
+				let cstr: CString = CString::new(&opt.optionString[..]).unwrap();
 				vm_opts.push(
 					JavaVMOptionImpl {
 						optionString: cstr.as_ptr(),
-						extraInfo: opt.extraInfo
-					});
+						extraInfo: opt.extraInfo,
+					}
+				);
 				vm_opts_vect.push(cstr);
 			}
 
@@ -237,12 +219,12 @@ impl JavaVM {
 
 		match res {
 			JniError::JNI_OK => {
-				let tuple = (JavaVM{
+				let r = JavaVM{
 					ptr: jvm,
 					version: args.version,
-					name: Box::new(name[..].to_owned())
-				}, Capability { _cap: () });
-				Ok(tuple)
+					name: name.to_owned(),
+				};
+				Ok((r, Capability::new()))
 			}
 			_ => Err(res)
 		}
@@ -252,14 +234,14 @@ impl JavaVM {
 		return self.version
 	}
 
-	pub fn get_env(&mut self) -> JavaEnv {
+	pub fn get_env(&mut self) -> Result<JavaEnv, JniError> {
 		unsafe {
 			let ref jni = **self.ptr;
 			self.get_env_gen(jni.AttachCurrentThread)
 		}
 	}
 
-	pub fn get_env_daemon(&mut self) -> JavaEnv {
+	pub fn get_env_daemon(&mut self) -> Result<JavaEnv, JniError> {
 		unsafe {
 			let ref jni = **self.ptr;
 			self.get_env_gen(jni.AttachCurrentThreadAsDaemon)
@@ -273,11 +255,14 @@ impl JavaVM {
 		}
 	}
 
-	unsafe fn get_env_gen(&mut self, fun: extern "C" fn(vm: *mut JavaVMImpl, penv: &mut *mut JNIEnvImpl, args: *mut JavaVMAttachArgsImpl) -> JniError) -> JavaEnv {
+	unsafe fn get_env_gen(&mut self, fun: extern "C" fn(vm: *mut JavaVMImpl, penv: &mut *mut JNIEnvImpl, args: *mut JavaVMAttachArgsImpl) -> JniError) -> Result<JavaEnv, JniError> {
 		let mut env: *mut JNIEnvImpl = 0 as *mut JNIEnvImpl;
 		let res = ((**self.ptr).GetEnv)(self.ptr, &mut env, self.version());
 		match res {
-			JniError::JNI_OK => JavaEnv { ptr: &mut *env, phantom: PhantomData, },
+			JniError::JNI_OK => Ok(JavaEnv{
+				ptr: &mut *env,
+				phantom: PhantomData,
+			}),
 			JniError::JNI_EDETACHED => {
 				let mut attachArgs = JavaVMAttachArgsImpl{
 					version: self.version(),
@@ -286,24 +271,35 @@ impl JavaVM {
 				};
 				let res = fun(self.ptr, &mut env, &mut attachArgs);
 				match res {
-					JniError::JNI_OK => JavaEnv { ptr: &mut *env, phantom: PhantomData, },
-					_ => panic!("AttachCurrentThread error {:?}!", res)
+					JniError::JNI_OK => Ok(JavaEnv{
+						ptr: &mut *env,
+						phantom: PhantomData,
+					}),
+					_ => Err(res)
 				}
 			},
-			JniError::JNI_EVERSION => panic!("Version {:?} is not supported by GetEnv!", self.version()),
-			_ => panic!("GetEnv error {:?}!", res)
+			_ => Err(res)
 		}
 	}
 
-	unsafe fn destroy_java_vm(&self) -> bool {
-		((**self.ptr).DestroyJavaVM)(self.ptr) == JniError::JNI_OK
+	unsafe fn destroy_java_vm(&mut self) -> JniError {
+		if self.ptr == 0 as *mut JavaVMImpl {
+			return JniError::JNI_OK;
+		}
+
+		let err = ((**self.ptr).DestroyJavaVM)(self.ptr);
+		self.ptr = 0 as *mut JavaVMImpl;
+		err
 	}
 }
 
 impl Drop for JavaVM {
 	fn drop(&mut self) {
 		unsafe {
-			self.destroy_java_vm();
+			let err = self.destroy_java_vm();
+			if err != JniError::JNI_OK {
+				panic!("DestroyJavaVM error: {:?}", err);
+			}
 		}
 	}
 }
@@ -321,7 +317,7 @@ pub struct JavaEnv<'a> {
 }
 
 impl<'a> JavaEnv<'a> {
-	/// Gets the version of the JVM
+	/// Gets the version of the JVM (mightt be bigger, than the JavaVM args version, but not less)
 	pub fn version(&self, _cap: &Capability) -> JniVersion {
 		unsafe {
 			mem::transmute(((**self.ptr).GetVersion)(self.ptr))
@@ -337,7 +333,7 @@ impl<'a> JavaEnv<'a> {
 												 loader: &T, buf: &[u8],
 												 cap: Capability) -> Result<(JavaClass, Capability), Exception> {
 		unsafe {
-			JObject::from_unless_null (
+			JObject::from_unless_null(
 				self.clone(),
 				((**self.ptr).DefineClass)(
 					self.ptr,
@@ -377,14 +373,14 @@ impl<'a> JavaEnv<'a> {
 	/// when the function returns.
 	pub fn throw(&self, obj: &JavaThrowable, _cap: Capability) -> (bool, Exception)  {
 		unsafe {
-			(((**self.ptr).Throw)(self.ptr, obj.ptr) == JniError::JNI_OK, Exception { _cap: () })
+			(((**self.ptr).Throw)(self.ptr, obj.ptr) == JniError::JNI_OK, Exception::new())
 		}
 	}
 
 	pub fn throw_new(&self, clazz: &JavaClass, msg: &JavaChars, _cap: Capability) -> (bool, Exception) {
 		unsafe {
 			(((**self.ptr).ThrowNew)(self.ptr, clazz.ptr, msg.as_ptr() as *const ::libc::c_char) == JniError::JNI_OK,
-			 Exception { _cap: () })
+			 Exception::new())
 		}
 	}
 
@@ -413,7 +409,7 @@ impl<'a> JavaEnv<'a> {
 		unsafe {
 			((**self.ptr).ExceptionClear)(self.ptr)
 		}
-		Capability { _cap: () }
+		Capability::new()
 	}
 
 	pub fn fatal_error(&self, msg: &JavaChars, _cap: &Capability) -> ! {
@@ -428,7 +424,7 @@ impl<'a> JavaEnv<'a> {
 	}
 
 	pub unsafe fn pop_local_frame<T: JObject<'a>>(&self, result: &'a T) -> T {
-		T::from_unsafe(self.clone(), ((**self.ptr).PopLocalFrame)(self.ptr, result.get_obj()))
+		T::from_jobject(self.clone(), ((**self.ptr).PopLocalFrame)(self.ptr, result.get_obj()))
 	}
 
 	pub fn is_same_object<T1: JObject<'a>, T2: JObject<'a>>(&self, obj1: &T1, obj2: &T2, _cap: &Capability) -> bool {
@@ -479,7 +475,7 @@ impl<'a> JavaEnv<'a> {
 		} {
 			Ok(cap)
 		} else {
-			Err(Exception { _cap: () })
+			Err(Exception::new())
 		}
 	}
 
@@ -518,7 +514,7 @@ impl<'a> JavaEnv<'a> {
 	}
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefType {
 	Local,
 	Global,
@@ -533,7 +529,7 @@ pub trait JObject<'a>: Drop {
 	fn ref_type(&self) -> RefType;
 	unsafe fn from_parts_type(env: JavaEnv<'a>, ptr: jobject, typ: RefType, cap: Capability) -> ThisResult<Self>;
 	unsafe fn from_parts(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> ThisResult<Self>;
-	unsafe fn from_unsafe(env: JavaEnv<'a>, ptr: jobject) -> Self;
+	unsafe fn from_jobject(env: JavaEnv<'a>, ptr: jobject) -> Self;
 	unsafe fn from_unless_null(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> ThisResult<Self>;
 	fn global(&'a self, cap: Capability) -> ThisResult<Self>;
 	fn weak(&'a self, cap: Capability) -> ThisResult<Self>;
@@ -614,33 +610,11 @@ macro_rules! impl_jobject(
 	($cls:ident, $native:ident) => (
 		impl<'a> Drop for $cls<'a> {
 			fn drop(&mut self) {
-				let env = self.get_env();
-				match self.ref_type() {
-					RefType::Local => unsafe {
-						((**env.ptr).DeleteLocalRef)(env.ptr, self.get_obj())
-					},
-					RefType::Global => unsafe {
-						((**env.ptr).DeleteGlobalRef)(env.ptr, self.get_obj())
-					},
-					RefType::Weak => unsafe {
-						((**env.ptr).DeleteWeakGlobalRef)(env.ptr, self.get_obj())
-					},
-				}
+				self.dec_ref();
 			}
 		}
 
-		//     impl<'a> $cls<'a> {
-		//     fn copy(&self) -> $cls {
-		//     $cls {
-		//     env: self.get_env(),
-		//     ptr: self.inc_ref(),
-		//     rtype: self.rtype
-		// }
-		// }
-		// }
-
 		impl<'a> JObject<'a> for $cls<'a> {
-
 			fn get_env(&self) -> JavaEnv<'a> {
 				self.env.clone()
 			}
@@ -653,7 +627,7 @@ macro_rules! impl_jobject(
 				self.rtype
 			}
 
-			unsafe fn from_unsafe (env: JavaEnv<'a>, ptr: jobject) -> $cls<'a> {
+			unsafe fn from_jobject(env: JavaEnv<'a>, ptr: jobject) -> $cls<'a> {
 				return $cls {
 					env: env.clone(),
 					ptr: ptr as $native,
@@ -667,7 +641,7 @@ macro_rules! impl_jobject(
 
 			unsafe fn from_parts_type(env: JavaEnv<'a>, ptr: jobject, typ: RefType, cap: Capability) -> ThisResult<$cls<'a>> {
 				if env.exception_check() {
-					Err(Exception { _cap: () })
+					Err(Exception::new())
 				} else {
 					Ok(($cls {
 						env: env.clone(),
@@ -677,9 +651,9 @@ macro_rules! impl_jobject(
 				}
 			}
 
-			unsafe fn from_unless_null (env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> ThisResult<$cls<'a>> {
+			unsafe fn from_unless_null(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> ThisResult<$cls<'a>> {
 				if ptr as usize == 0 {
-					Err(Exception { _cap: () })
+					Err(Exception::new())
 				} else {
 					Ok(($cls {
 						env: env.clone(),
@@ -692,7 +666,9 @@ macro_rules! impl_jobject(
 
 			fn global(&self, cap: Capability) -> ThisResult<$cls<'a>> {
 				let env = self.get_env();
-				unsafe { $cls::from_parts_type(env.clone(), env.new_global_ref(self), RefType::Global, cap)}
+				unsafe {
+					$cls::from_parts_type(env.clone(), env.new_global_ref(self), RefType::Global, cap)
+				}
 			}
 
 			fn weak(&self, cap: Capability) -> ThisResult<$cls<'a>> {
@@ -893,7 +869,6 @@ impl JavaPrimitive for jlong {}
 impl JavaPrimitive for jfloat {}
 impl JavaPrimitive for jdouble {}
 
-use ::std::marker::PhantomData;
 pub struct JavaArray<'a, T: 'a + JObject<'a>> {
 	env: JavaEnv<'a>,
 	ptr: jarray,
@@ -942,7 +917,7 @@ impl<'a, T: 'a + JObject<'a>> JObject<'a> for JavaArray<'a, T> {
 		self.rtype
 	}
 
-	unsafe fn from_unsafe(env: JavaEnv<'a>, ptr: jobject) -> JavaArray<'a, T> {
+	unsafe fn from_jobject(env: JavaEnv<'a>, ptr: jobject) -> JavaArray<'a, T> {
 		JavaArray{
 			env: env.clone(),
 			ptr: ptr as jarray,
@@ -953,7 +928,7 @@ impl<'a, T: 'a + JObject<'a>> JObject<'a> for JavaArray<'a, T> {
 
 	unsafe fn from_parts_type(env: JavaEnv<'a>, ptr: jobject, typ: RefType, cap: Capability) -> ThisResult<JavaArray<T>> {
 		if env.exception_check() {
-			Err(Exception { _cap: () })
+			Err(Exception::new())
 		} else {
 			Ok((JavaArray{
 				env: env.clone(),
@@ -970,7 +945,7 @@ impl<'a, T: 'a + JObject<'a>> JObject<'a> for JavaArray<'a, T> {
 
 	unsafe fn from_unless_null(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> ThisResult<JavaArray<T>> {
 		if ptr as usize == 0 {
-			Err(Exception { _cap: () })
+			Err(Exception::new())
 		} else {
 			Ok((JavaArray{
 				env: env.clone(),
@@ -987,5 +962,58 @@ impl<'a, T: 'a + JObject<'a>> JObject<'a> for JavaArray<'a, T> {
 
 	fn weak(&'a self, cap: Capability) -> ThisResult<JavaArray<T>> {
 		unsafe { JavaArray::from_parts(self.env.clone(), self.get_env().new_weak_ref(self), cap) }
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use super::super::native::*;
+
+	#[test]
+	fn test_JavaVMOption() {
+		for s in &["", "-Xcheck:jni", "a"] {
+			let opt = JavaVMOption::new(s);
+			assert!(opt.extraInfo == 0 as *const ::libc::c_void);
+			assert!(opt.optionString == *s);
+			assert!(opt == *s);
+		}
+	}
+
+	#[test]
+	fn test_JavaVMInitArgs() {
+		let args = JavaVMInitArgs::new(
+			JniVersion::JNI_VERSION_1_6,
+			&[JavaVMOption::new("-Xcheck:jni"), JavaVMOption::new("-ea")],
+			false
+		);
+		assert!(!args.ignoreUnrecognized);
+		assert!(args.version == JniVersion::JNI_VERSION_1_6);
+		assert!(args.options.len() == 2);
+		assert!(args.options[0] == "-Xcheck:jni");
+		assert!(args.options == ["-Xcheck:jni", "-ea"]);
+	}
+
+	#[test]
+	fn test_JavaVMAttachArgs() {
+	}
+
+	#[test]
+	fn test_JavaEnv() {
+		let (mut jvm, cap) = JavaVM::new(
+			JavaVMInitArgs::new(
+				JniVersion::JNI_VERSION_1_6,
+				&[JavaVMOption::new("-Xcheck:jni")/*, JavaVMOption::new("-verbose:jni")*/],
+				false,
+			),
+		"1").unwrap();
+		assert!(jvm.version() == JniVersion::JNI_VERSION_1_6);
+
+		let ver = jvm.version();
+		let t = jvm.get_env();
+		assert!(!t.is_err());
+
+		let env = t.unwrap();
+		assert!(env.version(&cap) >= ver);
 	}
 }
