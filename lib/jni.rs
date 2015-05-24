@@ -181,7 +181,6 @@ impl<'a> JavaVMAttachArgs<'a> {
 pub struct JavaVM {
 	ptr: *mut JavaVMImpl,
 	version: JniVersion,
-	owned: bool,
 }
 
 unsafe impl Sync for JavaVM {}
@@ -223,7 +222,6 @@ impl JavaVM {
 				let r = JavaVM{
 					ptr: jvm,
 					version: args.version,
-					owned: true,
 				};
 				Ok((r, Capability::new()))
 			}
@@ -291,12 +289,9 @@ impl JavaVM {
 
 impl Drop for JavaVM {
 	fn drop(&mut self) {
-		if self.owned {
-			self.owned = false;
-			let err = unsafe { self.destroy_java_vm() };
-			if err != JniError::JNI_OK {
-				panic!("DestroyJavaVM error: {:?}", err);
-			}
+		let err = unsafe { self.destroy_java_vm() };
+		if err != JniError::JNI_OK {
+			panic!("DestroyJavaVM error: {:?}", err);
 		}
 	}
 }
