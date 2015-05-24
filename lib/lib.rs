@@ -4,6 +4,7 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 #![forbid(improper_ctypes)]
+#![feature(scoped)]
 
 extern crate libc;
 

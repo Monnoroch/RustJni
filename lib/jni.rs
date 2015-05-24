@@ -27,7 +27,7 @@
 //! ## Null handling
 //!
 //! Some JNI methods do not  allow `null` to  be passed to  them.  To
-//! solve this,  this interface  converts `null`  to `None`  and other
+//! solve this, this interface  converts `null`  to `None`  and other
 //! values to `Some(x)`.
 //!
 //! ## Error handling
@@ -181,14 +181,15 @@ impl<'a> JavaVMAttachArgs<'a> {
 pub struct JavaVM {
 	ptr: *mut JavaVMImpl,
 	version: JniVersion,
-	name: String,
+	owned: bool,
 }
+
+unsafe impl Sync for JavaVM {}
 
 impl JavaVM {
 	/// Creates a Java Virtual Machine.
 	/// The JVM will automatically be destroyed when the object goes out of scope.
-	pub fn new(args: JavaVMInitArgs, name: &str) -> Result<(JavaVM, Capability), JniError> {
-		use ::std::borrow::ToOwned;
+	pub fn new(args: JavaVMInitArgs) -> Result<(JavaVM, Capability), JniError> {
 		let (res, jvm) = unsafe {
 			let mut jvm: *mut JavaVMImpl = 0 as *mut JavaVMImpl;
 			let mut env: *mut JNIEnvImpl = 0 as *mut JNIEnvImpl;
@@ -222,7 +223,7 @@ impl JavaVM {
 				let r = JavaVM{
 					ptr: jvm,
 					version: args.version,
-					name: name.to_owned(),
+					owned: true,
 				};
 				Ok((r, Capability::new()))
 			}
@@ -234,39 +235,33 @@ impl JavaVM {
 		return self.version
 	}
 
-	pub fn get_env(&mut self) -> Result<JavaEnv, JniError> {
+	pub fn get_env(&self) -> Result<JavaEnv, JniError> {
 		unsafe {
 			let ref jni = **self.ptr;
 			self.get_env_gen(jni.AttachCurrentThread)
 		}
 	}
 
-	pub fn get_env_daemon(&mut self) -> Result<JavaEnv, JniError> {
+	pub fn get_env_daemon(&self) -> Result<JavaEnv, JniError> {
 		unsafe {
 			let ref jni = **self.ptr;
 			self.get_env_gen(jni.AttachCurrentThreadAsDaemon)
 		}
 	}
 
-	pub fn detach_current_thread(&mut self) -> bool {
-		unsafe {
-			let ref jni = **self.ptr;
-			(jni.DetachCurrentThread)(self.ptr) == JniError::JNI_OK
-		}
-	}
-
-	unsafe fn get_env_gen(&mut self, fun: extern "C" fn(vm: *mut JavaVMImpl, penv: &mut *mut JNIEnvImpl, args: *mut JavaVMAttachArgsImpl) -> JniError) -> Result<JavaEnv, JniError> {
+	unsafe fn get_env_gen(&self, fun: extern "C" fn(vm: *mut JavaVMImpl, penv: &mut *mut JNIEnvImpl, args: *mut JavaVMAttachArgsImpl) -> JniError) -> Result<JavaEnv, JniError> {
 		let mut env: *mut JNIEnvImpl = 0 as *mut JNIEnvImpl;
 		let res = ((**self.ptr).GetEnv)(self.ptr, &mut env, self.version());
 		match res {
 			JniError::JNI_OK => Ok(JavaEnv{
 				ptr: &mut *env,
 				phantom: PhantomData,
+				detach: false,
 			}),
 			JniError::JNI_EDETACHED => {
 				let mut attachArgs = JavaVMAttachArgsImpl{
 					version: self.version(),
-					name: self.name.as_ptr() as *const ::libc::c_char,
+					name: 0 as *const ::libc::c_char,
 					group: 0 as jobject
 				};
 				let res = fun(self.ptr, &mut env, &mut attachArgs);
@@ -274,6 +269,7 @@ impl JavaVM {
 					JniError::JNI_OK => Ok(JavaEnv{
 						ptr: &mut *env,
 						phantom: PhantomData,
+						detach: true,
 					}),
 					_ => Err(res)
 				}
@@ -295,8 +291,9 @@ impl JavaVM {
 
 impl Drop for JavaVM {
 	fn drop(&mut self) {
-		unsafe {
-			let err = self.destroy_java_vm();
+		if self.owned {
+			self.owned = false;
+			let err = unsafe { self.destroy_java_vm() };
 			if err != JniError::JNI_OK {
 				panic!("DestroyJavaVM error: {:?}", err);
 			}
@@ -309,23 +306,32 @@ impl Drop for JavaVM {
 /// created by this binding.
 ///
 /// TODO: allow for global/weak refs to outlive their env.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[allow(raw_pointer_derive)]
 pub struct JavaEnv<'a> {
 	ptr: *mut JNIEnvImpl,
 	phantom: PhantomData<&'a JavaVM>,
+	detach: bool,
+}
+
+impl<'a> Clone for JavaEnv<'a> {
+	fn clone(&self) -> JavaEnv<'a> {
+		JavaEnv {
+			ptr: self.ptr,
+			phantom: self.phantom,
+			detach: false,
+		}
+	}
 }
 
 impl<'a> JavaEnv<'a> {
 	/// Gets the version of the JVM (mightt be bigger, than the JavaVM args version, but not less)
 	pub fn version(&self, _cap: &Capability) -> JniVersion {
-		unsafe {
-			mem::transmute(((**self.ptr).GetVersion)(self.ptr))
+		let ver = unsafe { ((**self.ptr).GetVersion)(self.ptr) } as u32;
+		match ver {
+			0x00010001 ... 0x00010008 => unsafe { mem::transmute(ver) },
+			_ => panic!("Unsupported version {:?}!", ver),
 		}
-	}
-
-	pub fn ptr(&self) -> *mut JNIEnvImpl {
-		self.ptr
 	}
 
 	/// Defines a Java class from a name, ClassLoader, buffer, and length
@@ -499,17 +505,22 @@ impl<'a> JavaEnv<'a> {
 		}
 	}
 
-	// pub fn jvm(&self) -> &mut JavaVM {
-	//     JavaVM::from(unsafe {
-	//         let mut jvm: *mut JavaVMImpl = 0 as *mut JavaVMImpl;
-	//         ((**self.ptr).GetJavaVM)(self.ptr, &mut jvm);
-	//         jvm
-	//     })
-	// }
-
 	pub fn exception_check(&self) -> bool {
 		unsafe {
 			((**self.ptr).ExceptionCheck)(self.ptr) != 0
+		}
+	}
+}
+
+impl<'a> Drop for JavaEnv<'a> {
+	fn drop(&mut self) {
+		if self.detach {
+			self.detach = false;
+			unsafe {
+				let mut jvm: *mut JavaVMImpl = 0 as *mut JavaVMImpl;
+				assert!(((**self.ptr).GetJavaVM)(self.ptr, &mut jvm) == JniError::JNI_OK);
+				assert!(((**jvm).DetachCurrentThread)(jvm) == JniError::JNI_OK);
+			}
 		}
 	}
 }
@@ -998,22 +1009,40 @@ mod tests {
 	fn test_JavaVMAttachArgs() {
 	}
 
-	#[test]
-	fn test_JavaEnv() {
-		let (mut jvm, cap) = JavaVM::new(
-			JavaVMInitArgs::new(
-				JniVersion::JNI_VERSION_1_6,
-				&[JavaVMOption::new("-Xcheck:jni")/*, JavaVMOption::new("-verbose:jni")*/],
-				false,
-			),
-		"1").unwrap();
-		assert!(jvm.version() == JniVersion::JNI_VERSION_1_6);
-
-		let ver = jvm.version();
+	fn test_JavaEnv(jvm: &JavaVM, cap: &Capability) {
 		let t = jvm.get_env();
 		assert!(!t.is_err());
 
 		let env = t.unwrap();
-		assert!(env.version(&cap) >= ver);
+
+		assert!(env.version(&cap) >= jvm.version());
+	}
+
+	#[test]
+	fn test_JavaVM() {
+		use std::thread;
+
+		let (jvm, cap) = JavaVM::new(
+			JavaVMInitArgs::new(
+				JniVersion::JNI_VERSION_1_6,
+				&[/*JavaVMOption::new("-Xcheck:jni"), JavaVMOption::new("-verbose:jni")*/],
+				false,
+			)
+		).unwrap();
+		assert!(jvm.version() == JniVersion::JNI_VERSION_1_6);
+
+		test_JavaEnv(&jvm, &cap);
+		test_JavaEnv(&jvm, &cap);
+
+		let t1 = thread::scoped(|| {
+			test_JavaEnv(&jvm, &cap);
+		});
+
+		let t2 = thread::scoped(|| {
+			test_JavaEnv(&jvm, &cap);
+		});
+
+		let _ = t1.join();
+		let _ = t2.join();
 	}
 }
