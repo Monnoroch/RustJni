@@ -87,6 +87,7 @@ impl Exception {
 	}
 }
 
+pub type JniResult<T> = Result<(T, Capability), Exception>;
 
 /// Stores an option for the JVM
 #[allow(raw_pointer_derive)]
@@ -349,7 +350,7 @@ impl<'a> JavaEnv<'a> {
 
 	/// Takes a string and returns a Java class if successfull.
 	/// Returns `Err` on failure.
-	pub fn find_class(&self, name: &JavaChars, cap: Capability) -> ThisResult<JavaClass> {
+	pub fn find_class(&self, name: &JavaChars, cap: Capability) -> JniResult<JavaClass> {
 		unsafe {
 			JObject::from_unless_null(
 				self.clone(),
@@ -480,7 +481,7 @@ impl<'a> JavaEnv<'a> {
 		}
 	}
 
-	pub fn alloc_object(&self, clazz: &JavaClass, cap: Capability) -> ThisResult<JavaObject> {
+	pub fn alloc_object(&self, clazz: &JavaClass, cap: Capability) -> JniResult<JavaObject> {
 		unsafe {
 			JObject::from_unless_null(self.clone(),
 									  ((**self.ptr).AllocObject)(self.ptr, clazz.ptr),
@@ -531,18 +532,16 @@ pub enum RefType {
 	Weak,
 }
 
-pub type ThisResult<T> = Result<(T, Capability), Exception>;
-
 pub trait JObject<'a>: Drop {
 	fn get_env(&self) -> JavaEnv<'a>;
 	fn get_obj(&self) -> jobject;
 	fn ref_type(&self) -> RefType;
-	unsafe fn from_parts_type(env: JavaEnv<'a>, ptr: jobject, typ: RefType, cap: Capability) -> ThisResult<Self>;
-	unsafe fn from_parts(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> ThisResult<Self>;
+	unsafe fn from_parts_type(env: JavaEnv<'a>, ptr: jobject, typ: RefType, cap: Capability) -> JniResult<Self>;
+	unsafe fn from_parts(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> JniResult<Self>;
 	unsafe fn from_jobject(env: JavaEnv<'a>, ptr: jobject) -> Self;
-	unsafe fn from_unless_null(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> ThisResult<Self>;
-	fn global(&'a self, cap: Capability) -> ThisResult<Self>;
-	fn weak(&'a self, cap: Capability) -> ThisResult<Self>;
+	unsafe fn from_unless_null(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> JniResult<Self>;
+	fn global(&'a self, cap: Capability) -> JniResult<Self>;
+	fn weak(&'a self, cap: Capability) -> JniResult<Self>;
 
 	fn inc_ref(&self) -> jobject {
 		let env = self.get_env();
@@ -574,7 +573,7 @@ pub trait JObject<'a>: Drop {
 		}
 	}
 
-	fn get_class(&'a self, cap: Capability) -> ThisResult<JavaClass<'a>> {
+	fn get_class(&'a self, cap: Capability) -> JniResult<JavaClass<'a>> {
 		let env = self.get_env();
 		unsafe {
 			JObject::from_parts(env.clone(),
@@ -645,11 +644,11 @@ macro_rules! impl_jobject(
 				}
 			}
 
-			unsafe fn from_parts(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> ThisResult<$cls> {
+			unsafe fn from_parts(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> JniResult<$cls> {
 				$cls::from_parts_type(env, ptr, RefType::Local, cap)
 			}
 
-			unsafe fn from_parts_type(env: JavaEnv<'a>, ptr: jobject, typ: RefType, cap: Capability) -> ThisResult<$cls<'a>> {
+			unsafe fn from_parts_type(env: JavaEnv<'a>, ptr: jobject, typ: RefType, cap: Capability) -> JniResult<$cls<'a>> {
 				if env.exception_check() {
 					Err(Exception::new())
 				} else {
@@ -661,7 +660,7 @@ macro_rules! impl_jobject(
 				}
 			}
 
-			unsafe fn from_unless_null(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> ThisResult<$cls<'a>> {
+			unsafe fn from_unless_null(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> JniResult<$cls<'a>> {
 				if ptr as usize == 0 {
 					Err(Exception::new())
 				} else {
@@ -674,14 +673,14 @@ macro_rules! impl_jobject(
 			}
 
 
-			fn global(&self, cap: Capability) -> ThisResult<$cls<'a>> {
+			fn global(&self, cap: Capability) -> JniResult<$cls<'a>> {
 				let env = self.get_env();
 				unsafe {
 					$cls::from_parts_type(env.clone(), env.new_global_ref(self), RefType::Global, cap)
 				}
 			}
 
-			fn weak(&self, cap: Capability) -> ThisResult<$cls<'a>> {
+			fn weak(&self, cap: Capability) -> JniResult<$cls<'a>> {
 				let env = self.get_env();
 				unsafe {
 					$cls::from_parts_type(env.clone(), env.new_weak_ref(self), RefType::Weak, cap)
@@ -750,7 +749,7 @@ impl<'a> JavaClass<'a> {
 		}
 	}
 
-	pub fn alloc(&self, cap: Capability) -> ThisResult<JavaObject> {
+	pub fn alloc(&self, cap: Capability) -> JniResult<JavaObject> {
 		let env = self.get_env();
 		unsafe {
 			let ptr: jobject = ((**env.ptr).AllocObject)(env.ptr, self.ptr);
@@ -758,7 +757,7 @@ impl<'a> JavaClass<'a> {
 		}
 	}
 
-	pub fn find(env: &'a JavaEnv, name: &JavaChars, cap: Capability) -> ThisResult<JavaClass<'a>> {
+	pub fn find(env: &'a JavaEnv, name: &JavaChars, cap: Capability) -> JniResult<JavaClass<'a>> {
 		env.find_class(name, cap)
 	}
 }
@@ -784,7 +783,7 @@ impl_jobject!(JavaString, jstring);
 
 use super::j_chars::JavaChars;
 impl<'a> JavaString<'a> {
-	pub fn new(env: &'a JavaEnv<'a>, val: &super::j_chars::JavaChars, cap: Capability) -> ThisResult<JavaString<'a>> {
+	pub fn new(env: &'a JavaEnv<'a>, val: &super::j_chars::JavaChars, cap: Capability) -> JniResult<JavaString<'a>> {
 		unsafe {
 			JObject::from_parts(env.clone(),
 								((**env.ptr).NewStringUTF)(env.ptr, val.as_ptr()) as jobject,
@@ -936,7 +935,7 @@ impl<'a, T: 'a + JObject<'a>> JObject<'a> for JavaArray<'a, T> {
 		}
 	}
 
-	unsafe fn from_parts_type(env: JavaEnv<'a>, ptr: jobject, typ: RefType, cap: Capability) -> ThisResult<JavaArray<T>> {
+	unsafe fn from_parts_type(env: JavaEnv<'a>, ptr: jobject, typ: RefType, cap: Capability) -> JniResult<JavaArray<T>> {
 		if env.exception_check() {
 			Err(Exception::new())
 		} else {
@@ -949,11 +948,11 @@ impl<'a, T: 'a + JObject<'a>> JObject<'a> for JavaArray<'a, T> {
 		}
 	}
 
-	unsafe fn from_parts(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> ThisResult<JavaArray<T>> {
+	unsafe fn from_parts(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> JniResult<JavaArray<T>> {
 		JavaArray::from_parts_type(env, ptr, RefType::Local, cap)
 	}
 
-	unsafe fn from_unless_null(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> ThisResult<JavaArray<T>> {
+	unsafe fn from_unless_null(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> JniResult<JavaArray<T>> {
 		if ptr as usize == 0 {
 			Err(Exception::new())
 		} else {
@@ -966,11 +965,11 @@ impl<'a, T: 'a + JObject<'a>> JObject<'a> for JavaArray<'a, T> {
 		}
 	}
 
-	fn global(&'a self, cap: Capability) -> ThisResult<JavaArray<T>> {
+	fn global(&'a self, cap: Capability) -> JniResult<JavaArray<T>> {
 		unsafe { JavaArray::from_parts(self.env.clone(), self.env.new_global_ref(self), cap) }
 	}
 
-	fn weak(&'a self, cap: Capability) -> ThisResult<JavaArray<T>> {
+	fn weak(&'a self, cap: Capability) -> JniResult<JavaArray<T>> {
 		unsafe { JavaArray::from_parts(self.env.clone(), self.get_env().new_weak_ref(self), cap) }
 	}
 }
