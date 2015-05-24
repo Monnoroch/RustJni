@@ -1005,16 +1005,8 @@ mod tests {
 		assert!(args.options == ["-Xcheck:jni", "-ea"]);
 	}
 
-	#[test]
-	fn test_JavaVMAttachArgs() {
-	}
-
 	fn test_JavaEnv(jvm: &JavaVM, cap: &Capability) {
-		let t = jvm.get_env();
-		assert!(!t.is_err());
-
-		let env = t.unwrap();
-
+		let env = jvm.get_env().unwrap();
 		assert!(env.version(&cap) >= jvm.version());
 	}
 
