@@ -511,10 +511,14 @@ impl<'a> Drop for JavaEnv<'a> {
 	fn drop(&mut self) {
 		if self.detach {
 			self.detach = false;
-			unsafe {
-				let mut jvm: *mut JavaVMImpl = 0 as *mut JavaVMImpl;
-				assert!(((**self.ptr).GetJavaVM)(self.ptr, &mut jvm) == JniError::JNI_OK);
-				assert!(((**jvm).DetachCurrentThread)(jvm) == JniError::JNI_OK);
+			let mut jvm: *mut JavaVMImpl = 0 as *mut JavaVMImpl;
+			let err = unsafe { ((**self.ptr).GetJavaVM)(self.ptr, &mut jvm) };
+			if err != JniError::JNI_OK {
+				panic!("GetJavaVM error: {:?}", err);
+			}
+			let err = unsafe { ((**jvm).DetachCurrentThread)(jvm) };
+			if err != JniError::JNI_OK {
+				panic!("DetachCurrentThread error: {:?}", err);
 			}
 		}
 	}
