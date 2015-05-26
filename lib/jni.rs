@@ -461,13 +461,13 @@ impl<'a> JavaEnv<'a> {
 		}
 	}
 
-	pub fn pop_local_frame_null<T: JObject<'a>>(&'a self, _cap: &Capability) {
+	pub fn pop_local_frame_null<T: 'a + JObject<'a>>(&'a self, _cap: &Capability) {
 		unsafe {
 			((**self.ptr).PopLocalFrame)(self.ptr, 0 as jobject);
 		};
 	}
 
-	pub fn pop_local_frame<T: JObject<'a>>(&'a self, result: &'a T, _cap: &Capability) -> T {
+	pub fn pop_local_frame<T: 'a + JObject<'a>>(&'a self, result: &'a T, _cap: &Capability) -> T {
 		let r = unsafe {
 			((**self.ptr).PopLocalFrame)(self.ptr, result.get_obj())
 		};
@@ -476,13 +476,13 @@ impl<'a> JavaEnv<'a> {
 		unsafe { JObject::from_unsafe(self, r) }
 	}
 
-	pub fn is_same_object<T1: JObject<'a>, T2: JObject<'a>>(&self, obj1: &T1, obj2: &T2, _cap: &Capability) -> bool {
+	pub fn is_same_object<'c, T1: 'a + JObject<'a>, T2: 'c + JObject<'c>>(&self, obj1: &T1, obj2: &T2) -> bool {
 		unsafe {
 			((**self.ptr).IsSameObject)(self.ptr, obj1.get_obj(), obj2.get_obj()) == JNI_TRUE
 		}
 	}
 
-	pub fn is_null<T: 'a + JObject<'a>>(&self, obj1: &T, _cap: &Capability) -> bool {
+	pub fn is_null<T: 'a + JObject<'a>>(&self, obj1: &T) -> bool {
 		unsafe {
 			((**self.ptr).IsSameObject)(self.ptr, obj1.get_obj(), 0 as jobject) == JNI_TRUE
 		}
@@ -561,6 +561,10 @@ impl<'a> JavaEnv<'a> {
 		} else {
 			Err((err, Exception::new()))
 		}
+	}
+
+	pub fn new_string(&'a self, msg: &str, cap: Capability) -> JniResult<JavaString<'a>> {
+		JavaString::new(self, msg, cap)
 	}
 }
 
@@ -684,18 +688,12 @@ pub trait JObject<'a>: Drop {
 		}
 	}
 
-	fn is_same<T: 'a + JObject<'a>>(&self, val: &T) -> bool {
-		let env = self.get_env();
-		unsafe {
-			((**env.ptr).IsSameObject)(env.ptr, self.get_obj(), val.get_obj()) == JNI_TRUE
-		}
+	fn is_same<'b, T: 'b + JObject<'b>>(&self, val: &T) -> bool where Self: 'a + Sized {
+		self.get_env().is_same_object(self, val)
 	}
 
-	fn is_null(&self) -> bool {
-		let val = self.get_env();
-		unsafe {
-			((**val.ptr).IsSameObject)(val.ptr, self.get_obj(), 0 as jobject) == JNI_TRUE
-		}
+	fn is_null(&self) -> bool where Self: 'a + Sized {
+		self.get_env().is_null(self)
 	}
 }
 // pub trait JArray<'a, T: 'a + JObject<'a>>: JObject<'a> {}
@@ -713,7 +711,7 @@ macro_rules! impl_jobject(
 			}
 		}
 
-		impl<'a, R: 'a + JObject<'a>> PartialEq<R> for $cls<'a> {
+		impl<'b, 'a, R: 'b + JObject<'b>> PartialEq<R> for $cls<'a> {
 			fn eq(&self, other: &R) -> bool {
 				self.is_same(other)
 			}
@@ -1006,10 +1004,11 @@ mod tests {
 		let (sobj, cap) = JavaString::new(&env, "hi!", cap).unwrap();
 		assert!(cls1 != sobj);
 		let scls = sobj.get_class(&cap);
-
-		// TODO: somehow these two asserts do not compile. WAT?!
-		// assert!(cls1 == scls);
-		// assert!(cls == scls);
+		assert!(scls == cls1);
+		assert!(scls == cls);
+		// TODO: somehow these cls1, scls and cls have different lifetimes (or not?)
+		assert!(cls1 == scls);
+		assert!(cls == scls);
 		assert!(scls.get_obj() != 0 as jobject);
 		let cap = env.exception_check().unwrap();
 
