@@ -313,15 +313,11 @@ pub struct JavaEnv<'a> {
 	detach: bool,
 }
 
-// impl<'a> Clone for JavaEnv<'a> {
-// 	fn clone(&self) -> JavaEnv<'a> {
-// 		JavaEnv {
-// 			ptr: self.ptr,
-// 			phantom: self.phantom,
-// 			detach: false,
-// 		}
-// 	}
-// }
+impl<'a> PartialEq for JavaEnv<'a> {
+	fn eq(&self, r: &Self) -> bool {
+		self.ptr == r.ptr
+	}
+}
 
 impl<'a> JavaEnv<'a> {
 	/// Gets the version of the JVM (mightt be bigger, than the JavaVM args version, but not less)
@@ -476,7 +472,8 @@ impl<'a> JavaEnv<'a> {
 		unsafe { JObject::from_unsafe(self, r) }
 	}
 
-	pub fn is_same_object<'c, T1: 'a + JObject<'a>, T2: 'c + JObject<'c>>(&self, obj1: &T1, obj2: &T2) -> bool {
+	// TODO: 'b MUST be == 'a
+	pub fn is_same_object<'b, T1: 'a + JObject<'a>, T2: 'b + JObject<'b>>(&self, obj1: &T1, obj2: &T2) -> bool {
 		unsafe {
 			((**self.ptr).IsSameObject)(self.ptr, obj1.get_obj(), obj2.get_obj()) == JNI_TRUE
 		}
@@ -688,10 +685,6 @@ pub trait JObject<'a>: Drop {
 		}
 	}
 
-	fn is_same<'b, T: 'b + JObject<'b>>(&self, val: &T) -> bool where Self: 'a + Sized {
-		self.get_env().is_same_object(self, val)
-	}
-
 	fn is_null(&self) -> bool where Self: 'a + Sized {
 		self.get_env().is_null(self)
 	}
@@ -711,9 +704,11 @@ macro_rules! impl_jobject(
 			}
 		}
 
-		impl<'b, 'a, R: 'b + JObject<'b>> PartialEq<R> for $cls<'a> {
+		// TODO: 'b MUST be == 'a
+		impl<'a, 'b, R: 'b + JObject<'b>> PartialEq<R> for $cls<'a> {
 			fn eq(&self, other: &R) -> bool {
-				self.is_same(other)
+				assert!(self.get_env() == other.get_env());
+				self.get_env().is_same_object(self, other)
 			}
 		}
 
@@ -935,7 +930,8 @@ impl<'a, T: 'a + JObject<'a>> Drop for JavaArray<'a, T> {
 
 impl<'a, T: 'a + JObject<'a>, R: 'a + JObject<'a>> PartialEq<R> for JavaArray<'a, T> {
 	fn eq(&self, other: &R) -> bool {
-		self.is_same(other)
+		assert!(self.get_env() == other.get_env());
+		self.get_env().is_same_object(self, other)
 	}
 }
 

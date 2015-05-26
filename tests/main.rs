@@ -50,7 +50,7 @@ fn mytest() -> Result<(),jni::Exception> {
 	let class2 = st.get_class(&cap);
 	println!(
 		"Clses are {:?}, {:?}, {:?}, {:?}", cls, class,
-		cls.is_same(&class2),
+		cls == class2,
 		st.is_instance_of(&cls, &cap)
 	);
 
