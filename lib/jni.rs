@@ -319,6 +319,8 @@ impl<'a> PartialEq for JavaEnv<'a> {
 	}
 }
 
+impl<'a> Eq for JavaEnv<'a> {}
+
 impl<'a> JavaEnv<'a> {
 	/// Gets the version of the JVM (mightt be bigger, than the JavaVM args version, but not less)
 	pub fn version(&self, _cap: &Capability) -> JniVersion {
