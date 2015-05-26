@@ -1007,7 +1007,7 @@ mod tests {
 		assert!(cls1 != sobj);
 		let scls = sobj.get_class(&cap);
 
-		// TODO: somehow these to asserts do not compile. WAT?!
+		// TODO: somehow these two asserts do not compile. WAT?!
 		// assert!(cls1 == scls);
 		// assert!(cls == scls);
 		assert!(scls.get_obj() != 0 as jobject);
