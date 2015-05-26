@@ -45,6 +45,7 @@ use ::std::ffi::CString;
 use ::std::marker::PhantomData;
 
 use super::native::*;
+use super::j_chars::JavaChars;
 
 /// A token that indicates that the VM does not have a pending
 /// exception.
@@ -62,6 +63,7 @@ use super::native::*;
 ///
 /// * If the method cannot raise an exception, but cannot be called if
 ///   one is pending, a `Capability` will be taken by const reference.
+#[derive(Debug)]
 pub struct Capability {
 	_cap: ()
 }
@@ -77,6 +79,7 @@ impl Capability {
 ///
 /// This token can be converted back into a `Capability` object by
 /// clearing the exception.
+#[derive(Debug)]
 pub struct Exception {
 	_cap: ()
 }
@@ -189,7 +192,7 @@ unsafe impl Sync for JavaVM {}
 impl JavaVM {
 	/// Creates a Java Virtual Machine.
 	/// The JVM will automatically be destroyed when the object goes out of scope.
-	pub fn new(args: JavaVMInitArgs) -> Result<(JavaVM, Capability), JniError> {
+	pub fn new(args: JavaVMInitArgs) -> Result<JavaVM, JniError> {
 		let (res, jvm) = unsafe {
 			let mut jvm: *mut JavaVMImpl = 0 as *mut JavaVMImpl;
 			let mut env: *mut JNIEnvImpl = 0 as *mut JNIEnvImpl;
@@ -224,7 +227,7 @@ impl JavaVM {
 					ptr: jvm,
 					version: args.version,
 				};
-				Ok((r, Capability::new()))
+				Ok(r)
 			}
 			_ => Err(res)
 		}
@@ -234,29 +237,29 @@ impl JavaVM {
 		return self.version
 	}
 
-	pub fn get_env(&self) -> Result<JavaEnv, JniError> {
+	pub fn get_env(&self) -> Result<(JavaEnv, Capability), JniError> {
 		unsafe {
 			let ref jni = **self.ptr;
 			self.get_env_gen(jni.AttachCurrentThread)
 		}
 	}
 
-	pub fn get_env_daemon(&self) -> Result<JavaEnv, JniError> {
+	pub fn get_env_daemon(&self) -> Result<(JavaEnv, Capability), JniError> {
 		unsafe {
 			let ref jni = **self.ptr;
 			self.get_env_gen(jni.AttachCurrentThreadAsDaemon)
 		}
 	}
 
-	unsafe fn get_env_gen(&self, fun: extern "C" fn(vm: *mut JavaVMImpl, penv: &mut *mut JNIEnvImpl, args: *mut JavaVMAttachArgsImpl) -> JniError) -> Result<JavaEnv, JniError> {
+	unsafe fn get_env_gen(&self, fun: extern "C" fn(vm: *mut JavaVMImpl, penv: &mut *mut JNIEnvImpl, args: *mut JavaVMAttachArgsImpl) -> JniError) -> Result<(JavaEnv, Capability), JniError> {
 		let mut env: *mut JNIEnvImpl = 0 as *mut JNIEnvImpl;
 		let res = ((**self.ptr).GetEnv)(self.ptr, &mut env, self.version());
 		match res {
-			JniError::JNI_OK => Ok(JavaEnv{
+			JniError::JNI_OK => Ok((JavaEnv{
 				ptr: &mut *env,
 				phantom: PhantomData,
 				detach: false,
-			}),
+			}, Capability::new())),
 			JniError::JNI_EDETACHED => {
 				let mut attachArgs = JavaVMAttachArgsImpl{
 					version: self.version(),
@@ -265,11 +268,11 @@ impl JavaVM {
 				};
 				let res = fun(self.ptr, &mut env, &mut attachArgs);
 				match res {
-					JniError::JNI_OK => Ok(JavaEnv{
+					JniError::JNI_OK => Ok((JavaEnv{
 						ptr: &mut *env,
 						phantom: PhantomData,
 						detach: true,
-					}),
+					}, Capability::new())),
 					_ => Err(res)
 				}
 			},
@@ -310,15 +313,15 @@ pub struct JavaEnv<'a> {
 	detach: bool,
 }
 
-impl<'a> Clone for JavaEnv<'a> {
-	fn clone(&self) -> JavaEnv<'a> {
-		JavaEnv {
-			ptr: self.ptr,
-			phantom: self.phantom,
-			detach: false,
-		}
-	}
-}
+// impl<'a> Clone for JavaEnv<'a> {
+// 	fn clone(&self) -> JavaEnv<'a> {
+// 		JavaEnv {
+// 			ptr: self.ptr,
+// 			phantom: self.phantom,
+// 			detach: false,
+// 		}
+// 	}
+// }
 
 impl<'a> JavaEnv<'a> {
 	/// Gets the version of the JVM (mightt be bigger, than the JavaVM args version, but not less)
@@ -331,113 +334,157 @@ impl<'a> JavaEnv<'a> {
 	}
 
 	/// Defines a Java class from a name, ClassLoader, buffer, and length
-	pub fn define_class<'b, T: 'b + JObject<'b>>(&self, name: &JavaChars,
-												 loader: &T, buf: &[u8],
-												 cap: Capability) -> Result<(JavaClass, Capability), Exception> {
-		unsafe {
-			JObject::from_unless_null(
-				self.clone(),
-				((**self.ptr).DefineClass)(
-					self.ptr,
-					name.as_ptr() as *const ::libc::c_char,
-					loader.get_obj(),
-					buf.as_ptr() as *const jbyte,
-					buf.len() as jsize
-						),
-				cap)
+	pub fn define_class<T: 'a + JObject<'a>>(&self, name: &str, loader: &T, buf: &[u8], cap: Capability) -> JniResult<JavaClass> {
+		let jname = JavaChars::new(name);
+		let (obj, _) = unsafe {
+			(((**self.ptr).DefineClass)(self.ptr, jname.as_ptr(), loader.get_obj(), buf.as_ptr() as *const jbyte, buf.len() as jsize), cap)
+		};
+		// here `cap` is taken, we can't call any Jni methods
+		if obj == 0 as jclass {
+			Err(Exception::new())
+		} else {
+			Ok((unsafe { JObject::from_unsafe(self, obj) }, Capability::new()))
 		}
 	}
 
 	/// Takes a string and returns a Java class if successfull.
 	/// Returns `Err` on failure.
-	pub fn find_class(&self, name: &JavaChars, cap: Capability) -> JniResult<JavaClass> {
-		unsafe {
-			JObject::from_unless_null(
-				self.clone(),
-				((**self.ptr).FindClass)(self.ptr, name.as_ptr()),
-				cap)
+	pub fn find_class(&self, name: &str, cap: Capability) -> JniResult<JavaClass> {
+		let jname = JavaChars::new(name);
+		let (obj, _) = unsafe {
+			(((**self.ptr).FindClass)(self.ptr, jname.as_ptr()), cap)
+		};
+		// here `cap` is taken, we can't call any Jni methods
+		if obj == 0 as jclass {
+			Err(Exception::new())
+		} else {
+			Ok((unsafe { JObject::from_unsafe(self, obj) }, Capability::new()))
 		}
 	}
 
 	/// Finds the superclass of the given class
-	pub fn get_super_class<'b>(&'b self, sub: &'b JavaClass<'b>, cap: &Capability) -> Option<JavaClass> {
-		sub.get_super(cap)
+	pub fn get_super_class(&self, sub: &'a JavaClass<'a>, _cap: &Capability) -> Option<JavaClass> {
+		let obj = unsafe {
+			((**self.ptr).GetSuperclass)(self.ptr, sub.ptr)
+		};
+		JObject::from(self, obj)
 	}
 
 	/// Check if a class can be assigned to another
 	pub fn is_assignable_from(&self, sub: &JavaClass, sup: &JavaClass, _cap: &Capability) -> bool {
 		unsafe {
-			((**self.ptr).IsAssignableFrom)(self.ptr, sub.ptr, sup.ptr) != 0
+			((**self.ptr).IsAssignableFrom)(self.ptr, sub.ptr, sup.ptr) == JNI_TRUE
 		}
 	}
 
 	/// Throw a Java exception. The actual exception will be thrown
 	/// when the function returns.
-	pub fn throw(&self, obj: &JavaThrowable, _cap: Capability) -> (bool, Exception)  {
-		unsafe {
-			(((**self.ptr).Throw)(self.ptr, obj.ptr) == JniError::JNI_OK, Exception::new())
+	pub fn throw(&self, obj: &JavaThrowable, cap: Capability) -> Result<Exception, JniError> {
+		let (err, _) = unsafe {
+			(((**self.ptr).Throw)(self.ptr, obj.ptr), cap)
+		};
+		// here `cap` is taken, we can't call any Jni methods
+		if err == JniError::JNI_OK {
+			Ok(Exception::new())
+		} else {
+			Err(err)
 		}
 	}
 
-	pub fn throw_new(&self, clazz: &JavaClass, msg: &JavaChars, _cap: Capability) -> (bool, Exception) {
-		unsafe {
-			(((**self.ptr).ThrowNew)(self.ptr, clazz.ptr, msg.as_ptr() as *const ::libc::c_char) == JniError::JNI_OK,
-			 Exception::new())
+	pub fn throw_new(&self, clazz: &JavaClass, msg: &str, cap: Capability) -> Result<Exception, JniError> {
+		let jmsg = JavaChars::new(msg);
+		let (err, _) = unsafe {
+			(((**self.ptr).ThrowNew)(self.ptr, clazz.ptr, jmsg.as_ptr()), cap)
+		};
+		// here `cap` is taken, we can't call any Jni methods
+		if err == JniError::JNI_OK {
+			Ok(Exception::new())
+		} else {
+			Err(err)
 		}
 	}
 
-	pub fn exception_occured(&self) -> Option<JavaThrowable> {
-		let ptr = unsafe {
+	pub fn exception_check(&self) -> Result<Capability, Exception> {
+		let ex = unsafe {
+			((**self.ptr).ExceptionCheck)(self.ptr) == JNI_TRUE
+		};
+		if ex {
+			Err(Exception::new())
+		} else {
+			Ok(Capability::new())
+		}
+	}
+
+	pub fn exception_occured(&self) -> Result<Capability, (JavaThrowable, Exception)> {
+		let obj = unsafe {
 			((**self.ptr).ExceptionOccurred)(self.ptr) as jobject
 		};
-		if ptr.is_null() {
-			None
+		if obj == 0 as jthrowable {
+			Ok(Capability::new())
 		} else {
-			Some(JavaThrowable {
-				env: self.clone(),
-				ptr: ptr as jclass,
-				rtype: RefType::Local,
-			})
+			Err((JObject::from(self, obj).unwrap(), Exception::new()))
 		}
 	}
 
-	pub fn exception_describe(&self) {
+	pub fn exception_describe(&self, _exn: &Exception) {
 		unsafe {
 			((**self.ptr).ExceptionDescribe)(self.ptr)
 		}
 	}
 
-	pub fn exception_clear(&self, _exn: Exception) -> Capability {
-		unsafe {
-			((**self.ptr).ExceptionClear)(self.ptr)
-		}
+	pub fn exception_clear(&self, exn: Exception) -> Capability {
+		let _  = unsafe {
+			((**self.ptr).ExceptionClear)(self.ptr);
+			exn
+		};
+		// here `exn` is taken, so there is no exception
 		Capability::new()
 	}
 
-	pub fn fatal_error(&self, msg: &JavaChars, _cap: &Capability) -> ! {
+	pub fn fatal_error(&self, msg: &str) -> ! {
+		let jmsg = JavaChars::new(msg);
 		unsafe {
-			((**self.ptr).FatalError)(self.ptr, msg.as_ptr());
+			((**self.ptr).FatalError)(self.ptr, jmsg.as_ptr());
 			unreachable!()
 		}
 	}
 
-	pub unsafe fn push_local_frame(&self, capacity: isize) -> bool {
-		((**self.ptr).PushLocalFrame)(self.ptr, capacity as jint) == JniError::JNI_OK
+	pub fn push_local_frame(&self, capacity: isize, cap: Capability) -> Result<Capability, (JniError, Exception)> {
+		let (err, _) = unsafe {
+			(((**self.ptr).PushLocalFrame)(self.ptr, capacity as jint), cap)
+		};
+		// here `cap` is taken, we can't call any Jni methods
+		if err == JniError::JNI_OK {
+			Ok(Capability::new())
+		} else {
+			Err((err, Exception::new()))
+		}
 	}
 
-	pub unsafe fn pop_local_frame<T: JObject<'a>>(&self, result: &'a T) -> T {
-		T::from_jobject(self.clone(), ((**self.ptr).PopLocalFrame)(self.ptr, result.get_obj()))
+	pub fn pop_local_frame_null<T: JObject<'a>>(&'a self, _cap: &Capability) {
+		unsafe {
+			((**self.ptr).PopLocalFrame)(self.ptr, 0 as jobject);
+		};
+	}
+
+	pub fn pop_local_frame<T: JObject<'a>>(&'a self, result: &'a T, _cap: &Capability) -> T {
+		let r = unsafe {
+			((**self.ptr).PopLocalFrame)(self.ptr, result.get_obj())
+		};
+		// documentation says, it never returns null
+		assert!(r != 0 as jobject);
+		unsafe { JObject::from_unsafe(self, r) }
 	}
 
 	pub fn is_same_object<T1: JObject<'a>, T2: JObject<'a>>(&self, obj1: &T1, obj2: &T2, _cap: &Capability) -> bool {
 		unsafe {
-			((**self.ptr).IsSameObject)(self.ptr, obj1.get_obj(), obj2.get_obj()) != 0
+			((**self.ptr).IsSameObject)(self.ptr, obj1.get_obj(), obj2.get_obj()) == JNI_TRUE
 		}
 	}
 
 	pub fn is_null<T: 'a + JObject<'a>>(&self, obj1: &T, _cap: &Capability) -> bool {
 		unsafe {
-			((**self.ptr).IsSameObject)(self.ptr, obj1.get_obj(), 0 as jobject) != 0
+			((**self.ptr).IsSameObject)(self.ptr, obj1.get_obj(), 0 as jobject) == JNI_TRUE
 		}
 	}
 
@@ -445,7 +492,8 @@ impl<'a> JavaEnv<'a> {
 		((**self.ptr).NewLocalRef)(self.ptr, lobj.get_obj())
 	}
 
-	fn delete_local_ref<T: 'a + JObject<'a>>(&self, gobj: T) {
+	fn delete_local_ref<T: 'a + JObject<'a>>(&self, gobj: &T) {
+		assert!(gobj.ref_type() == RefType::Local);
 		unsafe {
 			((**self.ptr).DeleteLocalRef)(self.ptr, gobj.get_obj())
 		}
@@ -455,7 +503,8 @@ impl<'a> JavaEnv<'a> {
 		((**self.ptr).NewGlobalRef)(self.ptr, lobj.get_obj())
 	}
 
-	fn delete_global_ref<T: 'a + JObject<'a>>(&self, gobj: T) {
+	fn delete_global_ref<T: 'a + JObject<'a>>(&self, gobj: &T) {
+		assert!(gobj.ref_type() == RefType::Global);
 		unsafe {
 			((**self.ptr).DeleteGlobalRef)(self.ptr, gobj.get_obj())
 		}
@@ -465,51 +514,66 @@ impl<'a> JavaEnv<'a> {
 		((**self.ptr).NewWeakGlobalRef)(self.ptr, lobj.get_obj())
 	}
 
-	fn delete_weak_ref<T: 'a + JObject<'a>>(&self, wobj: T) {
+	fn delete_weak_ref<T: 'a + JObject<'a>>(&self, wobj: &T) {
+		assert!(wobj.ref_type() == RefType::Weak);
 		unsafe {
 			((**self.ptr).DeleteWeakGlobalRef)(self.ptr, wobj.get_obj() as jweak)
 		}
 	}
 
-	pub fn ensure_local_capacity(&self, capacity: isize, cap: Capability) -> Result<Capability, Exception> {
-		if unsafe {
-			((**self.ptr).EnsureLocalCapacity)(self.ptr, capacity as jint) == JniError::JNI_OK
-		} {
-			Ok(cap)
+	pub fn ensure_local_capacity(&self, capacity: isize, cap: Capability) -> Result<Capability, (JniError, Exception)> {
+		let (err, _) = unsafe {
+			(((**self.ptr).EnsureLocalCapacity)(self.ptr, capacity as jint), cap)
+		};
+		// here `cap` is taken, we can't call any Jni methods
+		if err == JniError::JNI_OK { // here we know, there is no exception
+			Ok(Capability::new())
 		} else {
-			Err(Exception::new())
+			Err((err, Exception::new()))
 		}
 	}
 
 	pub fn alloc_object(&self, clazz: &JavaClass, cap: Capability) -> JniResult<JavaObject> {
-		unsafe {
-			JObject::from_unless_null(self.clone(),
-									  ((**self.ptr).AllocObject)(self.ptr, clazz.ptr),
-									  cap)
+		let (obj, _) = unsafe {
+			(((**self.ptr).AllocObject)(self.ptr, clazz.ptr), cap)
+		};
+		// here `cap` is taken, we can't call any Jni methods
+		if obj == 0 as jobject {
+			Err(Exception::new())
+		} else {
+			Ok((unsafe { JObject::from_unsafe(self, obj) }, Capability::new()))
 		}
 	}
 
-	pub fn monitor_enter<T: 'a + JObject<'a>>(&self, obj: &T) -> bool {
+	pub fn monitor_enter<T: 'a + JObject<'a>>(&self, obj: &T, _cap: &Capability) -> JniError {
 		unsafe {
-			((**self.ptr).MonitorEnter)(self.ptr, obj.get_obj()) == JniError::JNI_OK
+			((**self.ptr).MonitorEnter)(self.ptr, obj.get_obj())
 		}
 	}
 
-	pub fn monitor_exit<T: 'a + JObject<'a>>(&self, obj: &T) -> bool {
-		unsafe {
-			((**self.ptr).MonitorExit)(self.ptr, obj.get_obj()) == JniError::JNI_OK
-		}
-	}
-
-	pub fn exception_check(&self) -> bool {
-		unsafe {
-			((**self.ptr).ExceptionCheck)(self.ptr) != 0
+	pub fn monitor_exit<T: 'a + JObject<'a>>(&self, obj: &T, cap: Capability) -> Result<Capability, (JniError, Exception)> {
+		let (err, _) = unsafe {
+			(((**self.ptr).MonitorExit)(self.ptr, obj.get_obj()), cap)
+		};
+		// here `cap` is taken, we can't call any Jni methods
+		if err == JniError::JNI_OK {
+			Ok(Capability::new())
+		} else {
+			Err((err, Exception::new()))
 		}
 	}
 }
 
 impl<'a> Drop for JavaEnv<'a> {
 	fn drop(&mut self) {
+		match self.exception_check() {
+			Ok(_) => (),
+			Err(ex) => {
+				self.exception_describe(&ex);
+				self.exception_clear(ex);
+				assert!(false);
+			},
+		};
 		if self.detach {
 			self.detach = false;
 			let mut jvm: *mut JavaVMImpl = 0 as *mut JavaVMImpl;
@@ -533,99 +597,133 @@ pub enum RefType {
 }
 
 pub trait JObject<'a>: Drop {
-	fn get_env(&self) -> JavaEnv<'a>;
+	fn get_env(&self) -> &'a JavaEnv<'a>;
 	fn get_obj(&self) -> jobject;
 	fn ref_type(&self) -> RefType;
-	unsafe fn from_parts_type(env: JavaEnv<'a>, ptr: jobject, typ: RefType, cap: Capability) -> JniResult<Self>;
-	unsafe fn from_parts(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> JniResult<Self>;
-	unsafe fn from_jobject(env: JavaEnv<'a>, ptr: jobject) -> Self;
-	unsafe fn from_unless_null(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> JniResult<Self>;
-	fn global(&'a self, cap: Capability) -> JniResult<Self>;
-	fn weak(&'a self, cap: Capability) -> JniResult<Self>;
 
-	fn inc_ref(&self) -> jobject {
-		let env = self.get_env();
-		match self.ref_type() {
-			RefType::Local => unsafe {
-				((**env.ptr).NewLocalRef)(env.ptr, self.get_obj())
-			},
-			RefType::Global => unsafe {
-				((**env.ptr).NewGlobalRef)(env.ptr, self.get_obj())
-			},
-			RefType::Weak => unsafe {
-				((**env.ptr).NewWeakGlobalRef)(env.ptr, self.get_obj()) as jobject
-			},
-		}
+	unsafe fn from_unsafe_type(env: &'a JavaEnv<'a>, ptr: jobject, typ: RefType) -> Self;
+
+	unsafe fn from_unsafe(env: &'a JavaEnv<'a>, ptr: jobject) -> Self where Self: Sized {
+		Self::from_unsafe_type(env, ptr, RefType::Local)
 	}
 
-	fn dec_ref(&mut self) {
-		let env = self.get_env();
-		match self.ref_type() {
-			RefType::Local => unsafe {
-				((**env.ptr).DeleteLocalRef)(env.ptr, self.get_obj())
-			},
-			RefType::Global => unsafe {
-				((**env.ptr).DeleteGlobalRef)(env.ptr, self.get_obj())
-			},
-			RefType::Weak => unsafe {
-				((**env.ptr).DeleteWeakGlobalRef)(env.ptr, self.get_obj())
-			},
+	fn from(env: &'a JavaEnv<'a>, ptr: jobject) -> Option<Self> where Self: Sized {
+		if ptr == 0 as jobject {
+			return None;
 		}
+
+		Some(unsafe { Self::from_unsafe(env, ptr) })
 	}
 
-	fn get_class(&'a self, cap: Capability) -> JniResult<JavaClass<'a>> {
-		let env = self.get_env();
+	fn local(&'a self, cap: Capability) -> JniResult<Self> where Self: 'a + Sized {
 		unsafe {
-			JObject::from_parts(env.clone(),
-								((**env.ptr).GetObjectClass)(env.ptr, self.get_obj()) as jobject
-								, cap)
+			let (r, _) = (self.get_env().new_local_ref(self), cap);
+			// here `cap` is taken, we can't call any Jni methods
+			if r == 0 as jobject {
+				Err(Exception::new())
+			} else {
+				Ok((JObject::from_unsafe_type(self.get_env(), r, RefType::Local), Capability::new()))
+			}
 		}
 	}
 
-	fn as_jobject(&'a self) -> JavaObject {
-		JavaObject{
-			env: self.get_env(),
-			ptr: self.inc_ref(),
-			rtype: self.ref_type()
+	fn global(&'a self, cap: Capability) -> JniResult<Self> where Self: 'a + Sized {
+		unsafe {
+			let (r, _) = (self.get_env().new_global_ref(self), cap);
+			// here `cap` is taken, we can't call any Jni methods
+			if r == 0 as jobject {
+				Err(Exception::new())
+			} else {
+				Ok((JObject::from_unsafe_type(self.get_env(), r, RefType::Global), Capability::new()))
+			}
 		}
+	}
+
+	fn weak(&'a self, cap: Capability) -> JniResult<Self> where Self: 'a + Sized {
+		unsafe {
+			let (r, _) = (self.get_env().new_weak_ref(self), cap);
+			// here `cap` is taken, we can't call any Jni methods
+			if r == 0 as jobject {
+				Err(Exception::new())
+			} else {
+				Ok((JObject::from_unsafe_type(self.get_env(), r, RefType::Weak), Capability::new()))
+			}
+		}
+	}
+
+	fn get_class(&'a self, _cap: &Capability) -> JavaClass<'a> {
+		let env = self.get_env();
+		let cls = unsafe {
+			((**env.ptr).GetObjectClass)(env.ptr, self.get_obj())
+		};
+		// documentation says, it never returns null
+		assert!(cls != 0 as jclass);
+		unsafe { JObject::from_unsafe(env, cls) }
+	}
+
+	fn as_jobject(&'a self, cap: Capability) -> JniResult<JavaObject>  where Self: 'a + Sized {
+		let val = self.local(cap);
+		if val.is_err() {
+			return Err(val.err().unwrap());
+		}
+
+		let obj = val.unwrap();
+		let r = JavaObject {
+			env: obj.0.get_env(),
+			ptr: obj.0.get_obj(),
+			rtype: obj.0.ref_type()
+		};
+
+		Ok((r, obj.1))
 	}
 
 	fn is_instance_of(&self, clazz: &JavaClass, _cap: &Capability) -> bool {
 		let env = self.get_env();
 		unsafe {
-			((**env.ptr).IsInstanceOf)(env.ptr, self.get_obj(), clazz.ptr) != 0
+			((**env.ptr).IsInstanceOf)(env.ptr, self.get_obj(), clazz.ptr) == JNI_TRUE
 		}
 	}
 
-	fn is_same<'b, T: 'b + JObject<'b>>(&self, val: &T) -> bool {
+	fn is_same<T: 'a + JObject<'a>>(&self, val: &T) -> bool {
 		let env = self.get_env();
 		unsafe {
-			((**env.ptr).IsSameObject)(env.ptr, self.get_obj(), val.get_obj()) != 0
+			((**env.ptr).IsSameObject)(env.ptr, self.get_obj(), val.get_obj()) == JNI_TRUE
 		}
-
 	}
 
 	fn is_null(&self) -> bool {
 		let val = self.get_env();
 		unsafe {
-			((**val.ptr).IsSameObject)(val.ptr, self.get_obj(), 0 as jobject) != 0
+			((**val.ptr).IsSameObject)(val.ptr, self.get_obj(), 0 as jobject) == JNI_TRUE
 		}
 	}
 }
 // pub trait JArray<'a, T: 'a + JObject<'a>>: JObject<'a> {}
 
-
 macro_rules! impl_jobject(
 	($cls:ident, $native:ident) => (
 		impl<'a> Drop for $cls<'a> {
 			fn drop(&mut self) {
-				self.dec_ref();
+				let env = self.get_env();
+				match self.ref_type() {
+					RefType::Local => env.delete_local_ref(self),
+					RefType::Global => env.delete_global_ref(self),
+					RefType::Weak => env.delete_weak_ref(self),
+				}
 			}
 		}
 
+		impl<'a, R: 'a + JObject<'a>> PartialEq<R> for $cls<'a> {
+			fn eq(&self, other: &R) -> bool {
+				self.is_same(other)
+			}
+		}
+
+		impl<'a> Eq for $cls<'a> {}
+
 		impl<'a> JObject<'a> for $cls<'a> {
-			fn get_env(&self) -> JavaEnv<'a> {
-				self.env.clone()
+			fn get_env(&self) -> &'a JavaEnv<'a> {
+				self.env
 			}
 
 			fn get_obj(&self) -> jobject {
@@ -636,59 +734,16 @@ macro_rules! impl_jobject(
 				self.rtype
 			}
 
-			unsafe fn from_jobject(env: JavaEnv<'a>, ptr: jobject) -> $cls<'a> {
-				return $cls {
-					env: env.clone(),
+			unsafe fn from_unsafe_type(env: &'a JavaEnv<'a>, ptr: jobject, typ: RefType) -> $cls<'a> {
+				$cls {
+					env: env,
 					ptr: ptr as $native,
-					rtype: RefType::Local,
-				}
-			}
-
-			unsafe fn from_parts(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> JniResult<$cls> {
-				$cls::from_parts_type(env, ptr, RefType::Local, cap)
-			}
-
-			unsafe fn from_parts_type(env: JavaEnv<'a>, ptr: jobject, typ: RefType, cap: Capability) -> JniResult<$cls<'a>> {
-				if env.exception_check() {
-					Err(Exception::new())
-				} else {
-					Ok(($cls {
-						env: env.clone(),
-						ptr: ptr as $native,
-						rtype: typ,
-					}, cap))
-				}
-			}
-
-			unsafe fn from_unless_null(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> JniResult<$cls<'a>> {
-				if ptr as usize == 0 {
-					Err(Exception::new())
-				} else {
-					Ok(($cls {
-						env: env.clone(),
-						ptr: ptr as $native,
-						rtype: RefType::Local,
-					}, cap))
-				}
-			}
-
-
-			fn global(&self, cap: Capability) -> JniResult<$cls<'a>> {
-				let env = self.get_env();
-				unsafe {
-					$cls::from_parts_type(env.clone(), env.new_global_ref(self), RefType::Global, cap)
-				}
-			}
-
-			fn weak(&self, cap: Capability) -> JniResult<$cls<'a>> {
-				let env = self.get_env();
-				unsafe {
-					$cls::from_parts_type(env.clone(), env.new_weak_ref(self), RefType::Weak, cap)
+					rtype: typ,
 				}
 			}
 		}
-		);
 	);
+);
 
 macro_rules! impl_jarray(
 	($cls:ident, $native:ident) => (
@@ -710,7 +765,7 @@ macro_rules! impl_jarray(
 
 #[derive(Debug)]
 pub struct JavaObject<'a> {
-	env: JavaEnv<'a>,
+	env: &'a JavaEnv<'a>,
 	ptr: jobject,
 	rtype: RefType,
 }
@@ -722,7 +777,7 @@ impl_jobject!(JavaObject, jobject);
 
 #[derive(Debug)]
 pub struct JavaClass<'a> {
-	env: JavaEnv<'a>,
+	env: &'a JavaEnv<'a>,
 	ptr: jclass,
 	rtype: RefType,
 }
@@ -730,34 +785,15 @@ pub struct JavaClass<'a> {
 impl_jobject!(JavaClass, jclass);
 
 impl<'a> JavaClass<'a> {
-	pub fn get_super(&self, _cap: &Capability) -> Option<JavaClass<'a>> {
-		if self.ptr.is_null() {
-			return None
-		}
-		let env = self.get_env();
-		let ptr = unsafe {
-			((**env.ptr).GetSuperclass)(env.ptr, self.ptr) as jobject
-		};
-		if ptr.is_null() {
-			None
-		} else {
-			Some(JavaClass {
-				env: env.clone(),
-				ptr: ptr as jclass,
-				rtype: RefType::Local,
-			})
-		}
+	pub fn get_super(&'a self, cap: &Capability) -> Option<JavaClass<'a>> {
+		self.env.get_super_class(self, cap)
 	}
 
-	pub fn alloc(&self, cap: Capability) -> JniResult<JavaObject> {
-		let env = self.get_env();
-		unsafe {
-			let ptr: jobject = ((**env.ptr).AllocObject)(env.ptr, self.ptr);
-			JObject::from_unless_null(env, ptr, cap)
-		}
+	pub fn alloc(&'a self, cap: Capability) -> JniResult<JavaObject<'a>> {
+		self.env.alloc_object(self, cap)
 	}
 
-	pub fn find(env: &'a JavaEnv, name: &JavaChars, cap: Capability) -> JniResult<JavaClass<'a>> {
+	pub fn find<'b>(env: &'b JavaEnv<'b>, name: &str, cap: Capability) -> JniResult<JavaClass<'b>> {
 		env.find_class(name, cap)
 	}
 }
@@ -765,7 +801,7 @@ impl<'a> JavaClass<'a> {
 
 #[derive(Debug)]
 pub struct JavaThrowable<'a> {
-	env: JavaEnv<'a>,
+	env: &'a JavaEnv<'a>,
 	ptr: jthrowable,
 	rtype: RefType,
 }
@@ -774,24 +810,28 @@ impl_jobject!(JavaThrowable, jthrowable);
 
 #[derive(Debug)]
 pub struct JavaString<'a> {
-	env: JavaEnv<'a>,
+	env: &'a JavaEnv<'a>,
 	ptr: jstring,
 	rtype: RefType,
 }
 
 impl_jobject!(JavaString, jstring);
 
-use super::j_chars::JavaChars;
 impl<'a> JavaString<'a> {
-	pub fn new(env: &'a JavaEnv<'a>, val: &super::j_chars::JavaChars, cap: Capability) -> JniResult<JavaString<'a>> {
-		unsafe {
-			JObject::from_parts(env.clone(),
-								((**env.ptr).NewStringUTF)(env.ptr, val.as_ptr()) as jobject,
-								cap)
+	pub fn new<'b>(env: &'b JavaEnv<'b>, val: &str, cap: Capability) -> JniResult<JavaString<'b>> {
+		let jval = JavaChars::new(val);
+		let (r, _) = unsafe {
+			(((**env.ptr).NewStringUTF)(env.ptr, jval.as_ptr()), cap)
+		};
+		// here `cap` is taken, we can't call any Jni methods
+		if r == 0 as jstring {
+			Err(Exception::new())
+		} else {
+			Ok(( unsafe { JObject::from_unsafe(env, r) }, Capability::new()))
 		}
 	}
 
-	pub fn len(&self) -> usize {
+	pub fn len(&self, _cap: &Capability) -> usize {
 		unsafe {
 			((**self.get_env().ptr).GetStringLength)(self.get_env().ptr, self.ptr) as usize
 		}
@@ -849,7 +889,6 @@ impl<'a> Drop for JavaStringChars<'a> {
 	}
 }
 
-
 impl<'a> fmt::Debug for JavaStringChars<'a> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "\"{:?}\"", self.to_str())
@@ -879,7 +918,7 @@ impl JavaPrimitive for jfloat {}
 impl JavaPrimitive for jdouble {}
 
 pub struct JavaArray<'a, T: 'a + JObject<'a>> {
-	env: JavaEnv<'a>,
+	env: &'a JavaEnv<'a>,
 	ptr: jarray,
 	rtype: RefType,
 	phantom: PhantomData<T>,
@@ -889,33 +928,24 @@ impl<'a, T: 'a + JObject<'a>> Drop for JavaArray<'a, T> {
 	fn drop(&mut self) {
 		let env = self.get_env();
 		match self.ref_type() {
-			RefType::Local => unsafe {
-				((**env.ptr).DeleteLocalRef)(env.ptr, self.get_obj())
-			},
-			RefType::Global => unsafe {
-				((**env.ptr).DeleteGlobalRef)(env.ptr, self.get_obj())
-			},
-			RefType::Weak => unsafe {
-				((**env.ptr).DeleteWeakGlobalRef)(env.ptr, self.get_obj())
-			},
+			RefType::Local => env.delete_local_ref(self),
+			RefType::Global => env.delete_global_ref(self),
+			RefType::Weak => env.delete_weak_ref(self),
 		}
 	}
 }
 
-// impl<'a, T: 'a + JObject<'a>> JavaArray<'a,T> {
-//     fn dup(&self) -> JavaArray<T> {
-//         JavaArray{
-//             env: self.get_env(),
-//             ptr: self.inc_ref(),
-//             rtype: self.rtype,
-//             phantom: PhantomData::<T>,
-//         }
-//     }
-// }
+impl<'a, T: 'a + JObject<'a>, R: 'a + JObject<'a>> PartialEq<R> for JavaArray<'a, T> {
+	fn eq(&self, other: &R) -> bool {
+		self.is_same(other)
+	}
+}
+
+impl<'a, T: 'a + JObject<'a>> Eq for JavaArray<'a, T> {}
 
 impl<'a, T: 'a + JObject<'a>> JObject<'a> for JavaArray<'a, T> {
-	fn get_env(&self) -> JavaEnv<'a> {
-		self.env.clone()
+	fn get_env(&self) -> &'a JavaEnv<'a> {
+		self.env
 	}
 
 	fn get_obj(&self) -> jobject {
@@ -926,51 +956,13 @@ impl<'a, T: 'a + JObject<'a>> JObject<'a> for JavaArray<'a, T> {
 		self.rtype
 	}
 
-	unsafe fn from_jobject(env: JavaEnv<'a>, ptr: jobject) -> JavaArray<'a, T> {
-		JavaArray{
-			env: env.clone(),
+	unsafe fn from_unsafe_type(env: &'a JavaEnv<'a>, ptr: jobject, typ: RefType) -> JavaArray<'a, T> {
+		JavaArray {
+			env: env,
 			ptr: ptr as jarray,
-			rtype: RefType::Local,
+			rtype: typ,
 			phantom: PhantomData::<T>,
 		}
-	}
-
-	unsafe fn from_parts_type(env: JavaEnv<'a>, ptr: jobject, typ: RefType, cap: Capability) -> JniResult<JavaArray<T>> {
-		if env.exception_check() {
-			Err(Exception::new())
-		} else {
-			Ok((JavaArray{
-				env: env.clone(),
-				ptr: ptr as jarray,
-				rtype: typ,
-				phantom: PhantomData::<T>,
-			}, cap))
-		}
-	}
-
-	unsafe fn from_parts(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> JniResult<JavaArray<T>> {
-		JavaArray::from_parts_type(env, ptr, RefType::Local, cap)
-	}
-
-	unsafe fn from_unless_null(env: JavaEnv<'a>, ptr: jobject, cap: Capability) -> JniResult<JavaArray<T>> {
-		if ptr as usize == 0 {
-			Err(Exception::new())
-		} else {
-			Ok((JavaArray{
-				env: env.clone(),
-				ptr: ptr as jarray,
-				rtype: RefType::Local,
-				phantom: PhantomData::<T>,
-			}, cap))
-		}
-	}
-
-	fn global(&'a self, cap: Capability) -> JniResult<JavaArray<T>> {
-		unsafe { JavaArray::from_parts(self.env.clone(), self.env.new_global_ref(self), cap) }
-	}
-
-	fn weak(&'a self, cap: Capability) -> JniResult<JavaArray<T>> {
-		unsafe { JavaArray::from_parts(self.env.clone(), self.get_env().new_weak_ref(self), cap) }
 	}
 }
 
@@ -1003,16 +995,37 @@ mod tests {
 		assert!(args.options == ["-Xcheck:jni", "-ea"]);
 	}
 
-	fn test_JavaEnv(jvm: &JavaVM, cap: &Capability) {
-		let env = jvm.get_env().unwrap();
+	fn test_JavaEnv(jvm: &JavaVM) {
+		let (env, cap) = jvm.get_env().unwrap();
 		assert!(env.version(&cap) >= jvm.version());
+
+		let (cls, cap) = JavaClass::find(&env, "java/lang/String", cap).unwrap();
+		let (obj, cap) = cls.alloc(cap).unwrap();
+		let cls1 = obj.get_class(&cap);
+		assert!(cls1 == cls);
+		let (sobj, cap) = JavaString::new(&env, "hi!", cap).unwrap();
+		assert!(cls1 != sobj);
+		let scls = sobj.get_class(&cap);
+
+		// TODO: somehow these to asserts do not compile. WAT?!
+		// assert!(cls1 == scls);
+		// assert!(cls == scls);
+		assert!(scls.get_obj() != 0 as jobject);
+		let cap = env.exception_check().unwrap();
+
+		let cls = env.find_class("java/lang/String1", cap);
+		assert!(cls.is_err());
+		let tex = env.exception_check();
+		assert!(tex.is_err());
+		let ex = cls.err().unwrap();
+		let _ = env.exception_clear(ex);
 	}
 
 	#[test]
 	fn test_JavaVM() {
 		use std::thread;
 
-		let (jvm, cap) = JavaVM::new(
+		let jvm = JavaVM::new(
 			JavaVMInitArgs::new(
 				JniVersion::JNI_VERSION_1_6,
 				&[/*JavaVMOption::new("-Xcheck:jni"), JavaVMOption::new("-verbose:jni")*/],
@@ -1021,15 +1034,15 @@ mod tests {
 		).unwrap();
 		assert!(jvm.version() == JniVersion::JNI_VERSION_1_6);
 
-		test_JavaEnv(&jvm, &cap);
-		test_JavaEnv(&jvm, &cap);
+		test_JavaEnv(&jvm);
+		test_JavaEnv(&jvm);
 
 		let t1 = thread::scoped(|| {
-			test_JavaEnv(&jvm, &cap);
+			test_JavaEnv(&jvm);
 		});
 
 		let t2 = thread::scoped(|| {
-			test_JavaEnv(&jvm, &cap);
+			test_JavaEnv(&jvm);
 		});
 
 		let _ = t1.join();
