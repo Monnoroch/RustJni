@@ -709,7 +709,6 @@ macro_rules! impl_jobject(
 		// TODO: 'b MUST be == 'a
 		impl<'a, 'b, R: 'b + JObject<'b>> PartialEq<R> for $cls<'a> {
 			fn eq(&self, other: &R) -> bool {
-				assert!(self.get_env() == other.get_env());
 				self.get_env().is_same_object(self, other)
 			}
 		}
@@ -932,7 +931,6 @@ impl<'a, T: 'a + JObject<'a>> Drop for JavaArray<'a, T> {
 
 impl<'a, T: 'a + JObject<'a>, R: 'a + JObject<'a>> PartialEq<R> for JavaArray<'a, T> {
 	fn eq(&self, other: &R) -> bool {
-		assert!(self.get_env() == other.get_env());
 		self.get_env().is_same_object(self, other)
 	}
 }
