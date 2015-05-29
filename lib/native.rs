@@ -66,6 +66,9 @@ pub enum JniVersion {
 	JNI_VERSION_1_8 = 0x00010008,
 }
 
+pub const MIN_JNI_VERSION: u32 = JniVersion::JNI_VERSION_1_1 as u32;
+pub const MAX_JNI_VERSION: u32 = JniVersion::JNI_VERSION_1_8 as u32;
+
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
 #[repr(C)]
 pub enum JniError {
@@ -417,6 +420,8 @@ pub type JNIEnvImpl = *const JNINativeInterface;
 #[link(name = "jvm")]
 extern "C" {
 	pub fn JNI_CreateJavaVM(vm: *mut *mut JavaVMImpl, env: *mut *mut JNIEnvImpl, args: *mut JavaVMInitArgsImpl) -> JniError;
+	pub fn JNI_GetDefaultJavaVMInitArgs(args: *mut JavaVMInitArgsImpl) -> JniError;
+	pub fn JNI_GetCreatedJavaVMs(vm: *mut *mut JavaVMImpl, bufLen: jsize, nVMs: *mut jsize) -> JniError;
 }
 
 #[allow(dead_code)]

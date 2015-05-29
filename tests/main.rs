@@ -41,10 +41,10 @@ fn mytest() -> Result<(),jni::Exception> {
 		_ => panic!("unexpected exception")
 	};
 
-	println!("St is {:?}", st.to_str().unwrap());
-	// assert_eq!(st.to_str(), proto);
+	println!("St is {:?}", st.to_str(&cap).unwrap());
+	// assert_eq!(st.to_str(&cap), proto);
 
-	println!("St len is {:?} == {:?}", st.to_str().unwrap().len(), proto.len());
+	println!("St len is {:?} == {:?}", st.to_str(&cap).unwrap().len(), proto.len());
 
 	let class = st.get_class(&cap);
 	let class2 = st.get_class(&cap);
@@ -54,7 +54,9 @@ fn mytest() -> Result<(),jni::Exception> {
 		st.is_instance_of(&cls, &cap)
 	);
 
-	println!("st[2:7] == {:?}", st.region(2, 5));
+	println!("st[2:7] == {:?}", st.region(2, 5, cap));
+
+	let cap = env.exception_check().unwrap();
 
 	let (gst, cap) = try!(st.global(cap));
 	let (wgst, cap) = try!(gst.weak(cap));
@@ -65,3 +67,189 @@ fn mytest() -> Result<(),jni::Exception> {
 
 	Ok(())
 }
+
+/*
+use ::std::marker::PhantomData;
+
+struct Parent {
+	val: u64,
+}
+
+impl Parent {
+	pub fn new(v: u64) -> Parent {
+		Parent { val: v }
+	}
+
+	pub fn child(&self, v: u64) -> Child {
+		Child {
+			val: v,
+			phantom: PhantomData,
+		}
+	}
+}
+
+struct Child<'a> {
+	val: u64,
+	phantom: PhantomData<&'a Parent>,
+}
+
+impl<'a> Child<'a> {
+	pub fn compare(&'a self, l: &Obj<'a>, r: &Obj<'a>) -> bool {
+		l.val == r.val
+	}
+
+	pub fn obj(&'a self, v: u64) -> Obj<'a> {
+		Obj {
+			val: v,
+			child: self,
+		}
+	}
+}
+
+struct Obj<'a> {
+	val: u64,
+	child: &'a Child<'a>,
+}
+
+impl<'a> PartialEq<Obj<'a>> for Obj<'a> {
+	fn eq(&self, other: &Obj<'a>) -> bool {
+		self.child.compare(self, other)
+	}
+}
+
+
+#[test]
+fn test() {
+	let parent = Parent::new(1);
+	let child = parent.child(2);
+	let obj1 = child.obj(3);
+	let obj2 = child.obj(3);
+	assert!(obj1 == obj2);
+	assert!(obj2 == obj1);
+
+	let parent2 = Parent::new(1);
+	let child2 = parent2.child(2);
+	let obj12 = child2.obj(3);
+	let obj22 = child2.obj(3);
+	assert!(obj12 == obj22);
+	assert!(obj22 == obj12);
+
+	// assert!(obj1 == obj12);
+	assert!(obj12 == obj1);
+}
+
+*/
+
+/*
+use ::std::marker::PhantomData;
+
+struct Parent {
+	val: u64,
+}
+
+impl Parent {
+	pub fn new(v: u64) -> Parent {
+		Parent { val: v }
+	}
+
+	pub fn child(&self, v: u64) -> Child {
+		Child {
+			val: v,
+			phantom: PhantomData,
+		}
+	}
+}
+
+struct Child<'a> {
+	val: u64,
+	phantom: PhantomData<&'a Parent>,
+}
+
+impl<'a> Child<'a> {
+	pub fn compare<'b, L: 'a + Obj<'a>, R: 'a + Obj<'b>>(&'a self, l: &L, r: &R) -> bool {
+		l.get_val() == r.get_val()
+	}
+
+	pub fn obj1(&'a self, v: u64) -> Obj1<'a> {
+		Obj1 {
+			val: v,
+			child: self,
+		}
+	}
+
+	pub fn obj2(&'a self, v: u64) -> Obj2<'a> {
+		Obj2 {
+			val: v,
+			child: self,
+		}
+	}
+}
+
+trait Obj<'a> {
+	fn get_child(&'a self) -> &'a Child<'a>;
+	fn get_val(&self) -> u64;
+}
+
+struct Obj1<'a> {
+	val: u64,
+	child: &'a Child<'a>,
+}
+
+impl<'a, R: 'a + Obj<'a>> PartialEq<R> for Obj1<'a> {
+	fn eq(&self, other: &R) -> bool {
+		self.get_child().compare(self, other)
+	}
+}
+
+impl<'a> Obj<'a> for Obj1<'a> {
+	fn get_child(&'a self) -> &'a Child<'a> {
+		self.child
+	}
+
+	fn get_val(&self) -> u64 {
+		self.val
+	}
+}
+
+struct Obj2<'a> {
+	val: u64,
+	child: &'a Child<'a>,
+}
+
+impl<'a, R: 'a + Obj<'a>> PartialEq<R> for Obj2<'a> {
+	fn eq(&self, other: &R) -> bool {
+		self.get_child().compare(self, other)
+	}
+}
+
+impl<'a> Obj<'a> for Obj2<'a> {
+	fn get_child(&'a self) -> &'a Child<'a> {
+		self.child
+	}
+
+	fn get_val(&self) -> u64 {
+		self.val
+	}
+}
+
+#[test]
+fn test() {
+	let parent = Parent::new(1);
+	let child = parent.child(2);
+	let obj1 = child.obj1(3);
+	let obj2 = child.obj2(3);
+	assert!(obj1 == obj2);
+	assert!(obj2 == obj1);
+
+	let parent2 = Parent::new(1);
+	let child2 = parent2.child(2);
+	let obj12 = child2.obj1(3);
+	let obj22 = child2.obj2(3);
+	assert!(obj12 == obj22);
+	assert!(obj22 == obj12);
+
+	// assert!(obj1 == obj12);
+	assert!(obj12 == obj1);
+}
+
+*/
