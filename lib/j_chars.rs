@@ -1,4 +1,6 @@
-#[derive(Debug)]
+use ::std::fmt;
+
+#[derive(Clone, PartialEq, Eq)]
 pub struct JavaChars {
 	contents: Vec<u8>
 }
@@ -132,5 +134,14 @@ impl JavaChars {
 
 	pub unsafe fn from_raw_vec(data: Vec<u8>) -> Self {
 		JavaChars { contents: data, }
+	}
+}
+
+impl<'a> fmt::Debug for JavaChars {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self.to_string() {
+			None => write!(f, "Invalid JavaChars."),
+			Some(s) => write!(f, "{:?}", s),
+		}
 	}
 }
