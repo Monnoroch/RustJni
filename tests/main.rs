@@ -56,7 +56,7 @@ fn mytest() -> Result<(),jni::Exception> {
 
 	println!("st[2:7] == {:?}", st.region(2, 5, cap));
 
-	let cap = env.exception_check().unwrap();
+	let cap = JavaThrowable::check(&env).unwrap();
 
 	let (gst, cap) = try!(st.global(cap));
 	let (wgst, cap) = try!(gst.weak(cap));

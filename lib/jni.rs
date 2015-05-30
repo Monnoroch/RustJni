@@ -487,7 +487,7 @@ impl<'a> JavaEnv<'a> {
 
 	/// Throw a Java exception. The actual exception will be thrown
 	/// when the function returns.
-	pub fn throw(&self, obj: &JavaThrowable, cap: Capability) -> Result<Exception, JniError> {
+	fn throw(&self, obj: &JavaThrowable, cap: Capability) -> Result<Exception, JniError> {
 		let (err, _) = unsafe {
 			(((**self.ptr).Throw)(self.ptr, obj.ptr), cap)
 		};
@@ -499,7 +499,7 @@ impl<'a> JavaEnv<'a> {
 		}
 	}
 
-	pub fn throw_new(&self, clazz: &JavaClass, msg: &str, cap: Capability) -> Result<Exception, JniError> {
+	fn throw_new(&self, clazz: &JavaClass, msg: &str, cap: Capability) -> Result<Exception, JniError> {
 		let jmsg = JavaChars::new(msg);
 		let (err, _) = unsafe {
 			(((**self.ptr).ThrowNew)(self.ptr, clazz.ptr, jmsg.as_ptr()), cap)
@@ -512,7 +512,7 @@ impl<'a> JavaEnv<'a> {
 		}
 	}
 
-	pub fn exception_check(&self) -> Result<Capability, Exception> {
+	fn exception_check(&self) -> Result<Capability, Exception> {
 		let ex = unsafe {
 			((**self.ptr).ExceptionCheck)(self.ptr) == JNI_TRUE
 		};
@@ -523,7 +523,7 @@ impl<'a> JavaEnv<'a> {
 		}
 	}
 
-	pub fn exception_occured(&self) -> Result<Capability, (JavaThrowable, Exception)> {
+	fn exception_occured(&self) -> Result<Capability, (JavaThrowable, Exception)> {
 		let obj = unsafe {
 			((**self.ptr).ExceptionOccurred)(self.ptr) as jobject
 		};
@@ -534,13 +534,13 @@ impl<'a> JavaEnv<'a> {
 		}
 	}
 
-	pub fn exception_describe(&self, _exn: &Exception) {
+	fn exception_describe(&self, _exn: &Exception) {
 		unsafe {
 			((**self.ptr).ExceptionDescribe)(self.ptr)
 		}
 	}
 
-	pub fn exception_clear(&self, exn: Exception) -> Capability {
+	fn exception_clear(&self, exn: Exception) -> Capability {
 		let _  = unsafe {
 			((**self.ptr).ExceptionClear)(self.ptr);
 			exn
@@ -549,7 +549,7 @@ impl<'a> JavaEnv<'a> {
 		Capability::new()
 	}
 
-	pub fn fatal_error(&self, msg: &str) -> ! {
+	fn fatal_error(&self, msg: &str) -> ! {
 		let jmsg = JavaChars::new(msg);
 		unsafe {
 			((**self.ptr).FatalError)(self.ptr, jmsg.as_ptr());
@@ -598,33 +598,33 @@ impl<'a> JavaEnv<'a> {
 		}
 	}
 
-	unsafe fn new_local_ref<T: 'a + JObject<'a>>(&self, lobj: &T) -> jobject {
-		((**self.ptr).NewLocalRef)(self.ptr, lobj.get_obj())
+	fn new_local_ref<T: 'a + JObject<'a>>(&self, lobj: &T, _cap: Capability) -> jobject {
+		unsafe { ((**self.ptr).NewLocalRef)(self.ptr, lobj.get_obj()) }
 	}
 
-	fn delete_local_ref<T: 'a + JObject<'a>>(&self, gobj: &T) {
+	fn delete_local_ref<T: 'a + JObject<'a>>(&self, gobj: &T, _cap: &Capability) {
 		assert!(gobj.ref_type() == RefType::Local);
 		unsafe {
 			((**self.ptr).DeleteLocalRef)(self.ptr, gobj.get_obj())
 		}
 	}
 
-	unsafe fn new_global_ref<T: 'a + JObject<'a>>(&self, lobj: &T) -> jobject {
-		((**self.ptr).NewGlobalRef)(self.ptr, lobj.get_obj())
+	fn new_global_ref<T: 'a + JObject<'a>>(&self, lobj: &T, _cap: Capability) -> jobject {
+		unsafe { ((**self.ptr).NewGlobalRef)(self.ptr, lobj.get_obj()) }
 	}
 
-	fn delete_global_ref<T: 'a + JObject<'a>>(&self, gobj: &T) {
+	fn delete_global_ref<T: 'a + JObject<'a>>(&self, gobj: &T, _cap: &Capability) {
 		assert!(gobj.ref_type() == RefType::Global);
 		unsafe {
 			((**self.ptr).DeleteGlobalRef)(self.ptr, gobj.get_obj())
 		}
 	}
 
-	unsafe fn new_weak_ref<T: 'a + JObject<'a>>(&self, lobj: &T) -> jweak {
-		((**self.ptr).NewWeakGlobalRef)(self.ptr, lobj.get_obj())
+	fn new_weak_ref<T: 'a + JObject<'a>>(&self, lobj: &T, _cap: Capability) -> jweak {
+		unsafe { ((**self.ptr).NewWeakGlobalRef)(self.ptr, lobj.get_obj()) }
 	}
 
-	fn delete_weak_ref<T: 'a + JObject<'a>>(&self, wobj: &T) {
+	fn delete_weak_ref<T: 'a + JObject<'a>>(&self, wobj: &T, _cap: &Capability) {
 		assert!(wobj.ref_type() == RefType::Weak);
 		unsafe {
 			((**self.ptr).DeleteWeakGlobalRef)(self.ptr, wobj.get_obj() as jweak)
@@ -643,7 +643,7 @@ impl<'a> JavaEnv<'a> {
 		}
 	}
 
-	pub fn alloc_object(&self, clazz: &JavaClass, cap: Capability) -> JniResult<JavaObject> {
+	fn alloc_object(&self, clazz: &JavaClass, cap: Capability) -> JniResult<JavaObject> {
 		let (obj, _) = unsafe {
 			(((**self.ptr).AllocObject)(self.ptr, clazz.ptr), cap)
 		};
@@ -819,38 +819,29 @@ pub trait JObject<'a>: Drop {
 	}
 
 	fn local(&self, cap: Capability) -> JniResult<Self> where Self: 'a + Sized {
-		unsafe {
-			let (r, _) = (self.get_env().new_local_ref(self), cap);
-			// here `cap` is taken, we can't call any Jni methods
-			if r == 0 as jobject {
-				Err(Exception::new())
-			} else {
-				Ok((JObject::from_unsafe_type(self.get_env(), r, RefType::Local), Capability::new()))
-			}
+		let r = self.get_env().new_local_ref(self, cap);
+		if r == 0 as jobject {
+			Err(Exception::new())
+		} else {
+			Ok((unsafe { JObject::from_unsafe(self.get_env(), r) }, Capability::new()))
 		}
 	}
 
 	fn global(&self, cap: Capability) -> JniResult<Self> where Self: 'a + Sized {
-		unsafe {
-			let (r, _) = (self.get_env().new_global_ref(self), cap);
-			// here `cap` is taken, we can't call any Jni methods
-			if r == 0 as jobject {
-				Err(Exception::new())
-			} else {
-				Ok((JObject::from_unsafe_type(self.get_env(), r, RefType::Global), Capability::new()))
-			}
+		let r = self.get_env().new_global_ref(self, cap);
+		if r == 0 as jobject {
+			Err(Exception::new())
+		} else {
+			Ok((unsafe { JObject::from_unsafe_type(self.get_env(), r, RefType::Global) }, Capability::new()))
 		}
 	}
 
 	fn weak(&self, cap: Capability) -> JniResult<Self> where Self: 'a + Sized {
-		unsafe {
-			let (r, _) = (self.get_env().new_weak_ref(self), cap);
-			// here `cap` is taken, we can't call any Jni methods
-			if r == 0 as jobject {
-				Err(Exception::new())
-			} else {
-				Ok((JObject::from_unsafe_type(self.get_env(), r, RefType::Weak), Capability::new()))
-			}
+		let r = self.get_env().new_weak_ref(self, cap);
+		if r == 0 as jobject {
+			Err(Exception::new())
+		} else {
+			Ok((unsafe { JObject::from_unsafe_type(self.get_env(), r, RefType::Weak) }, Capability::new()))
 		}
 	}
 
@@ -890,10 +881,13 @@ macro_rules! impl_jobject(
 		impl<'a> Drop for $cls<'a> {
 			fn drop(&mut self) {
 				let env = self.get_env();
-				match self.ref_type() {
-					RefType::Local => env.delete_local_ref(self),
-					RefType::Global => env.delete_global_ref(self),
-					RefType::Weak => env.delete_weak_ref(self),
+				match env.exception_check() {
+					Ok(cap) => match self.ref_type() {
+						RefType::Local => env.delete_local_ref(self, &cap),
+						RefType::Global => env.delete_global_ref(self, &cap),
+						RefType::Weak => env.delete_weak_ref(self, &cap),
+					},
+					Err(_) => panic!("Can't call JNI method with pending exception."),
 				}
 			}
 		}
@@ -999,6 +993,36 @@ pub struct JavaThrowable<'a> {
 }
 
 impl_jobject!(JavaThrowable, jthrowable);
+
+impl<'a> JavaThrowable<'a> {
+	pub fn throw<'b>(env: &'b JavaEnv<'b>, obj: &JavaThrowable<'b>, cap: Capability) -> Result<Exception, JniError> {
+		env.throw(obj, cap)
+	}
+
+	pub fn throw_new<'b>(env: &'b JavaEnv<'b>, clazz: &JavaClass<'b>, msg: &str, cap: Capability) -> Result<Exception, JniError> {
+		env.throw_new(clazz, msg, cap)
+	}
+
+	pub fn check<'b>(env: &'b JavaEnv<'b>) -> Result<Capability, Exception> {
+		env.exception_check()
+	}
+
+	pub fn occured<'b>(env: &'b JavaEnv<'b>) -> Result<Capability, (JavaThrowable<'b>, Exception)> {
+		env.exception_occured()
+	}
+
+	pub fn describe<'b>(env: &'b JavaEnv<'b>, exn: &Exception) {
+		env.exception_describe(exn)
+	}
+
+	pub fn clear<'b>(env: &'b JavaEnv<'b>, exn: Exception) -> Capability {
+		env.exception_clear(exn)
+	}
+
+	pub fn fatal_error<'b>(env: &'b JavaEnv<'b>, msg: &str) -> ! {
+		env.fatal_error(msg)
+	}
+}
 
 pub struct JavaString<'a> {
 	env: &'a JavaEnv<'a>,
@@ -1108,10 +1132,13 @@ pub struct JavaArray<'a, T: 'a + JObject<'a>> {
 impl<'a, T: 'a + JObject<'a>> Drop for JavaArray<'a, T> {
 	fn drop(&mut self) {
 		let env = self.get_env();
-		match self.ref_type() {
-			RefType::Local => env.delete_local_ref(self),
-			RefType::Global => env.delete_global_ref(self),
-			RefType::Weak => env.delete_weak_ref(self),
+		match env.exception_check() {
+			Ok(cap) => match self.ref_type() {
+				RefType::Local => env.delete_local_ref(self, &cap),
+				RefType::Global => env.delete_global_ref(self, &cap),
+				RefType::Weak => env.delete_weak_ref(self, &cap),
+			},
+			Err(_) => panic!("Can't call JNI method with pending exception."),
 		}
 	}
 }
