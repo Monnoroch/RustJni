@@ -60,10 +60,10 @@ fn mytest() -> Result<(),jni::Exception> {
 
 	let (gst, cap) = try!(st.global(cap));
 	let (wgst, cap) = try!(gst.weak(cap));
-	let (wst, _cap) = try!(st.weak(cap));
-	println!("Wst is null: {:?}", wst.is_null());
+	let (wst, cap) = try!(st.weak(cap));
+	println!("Wst is null: {:?}", wst.is_null(&cap));
 	println!("{:?} {:?} {:?} {:?} {:?}", st, gst, wgst, wst, wgst);
-	println!("Wst is null: {:?}", wst.is_null());
+	println!("Wst is null: {:?}", wst.is_null(&cap));
 
 	Ok(())
 }

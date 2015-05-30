@@ -585,14 +585,14 @@ impl<'a> JavaEnv<'a> {
 	}
 
 	// TODO: 'b MUST be == 'a
-	pub fn is_same_object<'b, 'c, T1: 'b + JObject<'b>, T2: 'c + JObject<'c>>(&self, obj1: &T1, obj2: &T2) -> bool {
+	fn is_same_object<'b, 'c, T1: 'b + JObject<'b>, T2: 'c + JObject<'c>>(&self, obj1: &T1, obj2: &T2, _cap: &Capability) -> bool {
 		assert!(obj1.get_env().jvm() == obj2.get_env().jvm());
 		unsafe {
 			((**self.ptr).IsSameObject)(self.ptr, obj1.get_obj(), obj2.get_obj()) == JNI_TRUE
 		}
 	}
 
-	pub fn is_null<'b, T: 'b + JObject<'b>>(&self, obj1: &T) -> bool {
+	fn is_null<'b, T: 'b + JObject<'b>>(&self, obj1: &T, _cap: &Capability) -> bool {
 		unsafe {
 			((**self.ptr).IsSameObject)(self.ptr, obj1.get_obj(), 0 as jobject) == JNI_TRUE
 		}
@@ -655,25 +655,17 @@ impl<'a> JavaEnv<'a> {
 		}
 	}
 
-	pub fn monitor_enter<T: 'a + JObject<'a>>(&self, obj: &T, _cap: &Capability) -> JniError {
+	fn monitor_enter<T: 'a + JObject<'a>>(&self, obj: &T, _cap: &Capability) -> JniError {
 		unsafe {
 			((**self.ptr).MonitorEnter)(self.ptr, obj.get_obj())
 		}
 	}
 
-	pub fn monitor_exit<T: 'a + JObject<'a>>(&self, obj: &T, cap: Capability) -> Result<Capability, (JniError, Exception)> {
-		let (err, _) = unsafe {
-			(((**self.ptr).MonitorExit)(self.ptr, obj.get_obj()), cap)
-		};
-		// here `cap` is taken, we can't call any Jni methods
-		if err == JniError::JNI_OK {
-			Ok(Capability::new())
-		} else {
-			Err((err, Exception::new()))
-		}
+	fn monitor_exit<T: 'a + JObject<'a>>(&self, obj: &T, _cap: &Capability) -> JniError {
+		unsafe { ((**self.ptr).MonitorExit)(self.ptr, obj.get_obj()) }
 	}
 
-	pub fn is_instance_of<T: 'a + JObject<'a>>(&self, obj: &T, clazz: &JavaClass, _cap: &Capability) -> bool {
+	fn is_instance_of<T: 'a + JObject<'a>>(&self, obj: &T, clazz: &JavaClass, _cap: &Capability) -> bool {
 		unsafe {
 			((**self.ptr).IsInstanceOf)(self.ptr, obj.get_obj(), clazz.ptr) == JNI_TRUE
 		}
@@ -869,8 +861,40 @@ pub trait JObject<'a>: Drop {
 		self.get_env().is_instance_of(self, clazz, cap)
 	}
 
-	fn is_null(&self) -> bool where Self: 'a + Sized {
-		self.get_env().is_null(self)
+	fn is_null(&self, cap: &Capability) -> bool where Self: 'a + Sized {
+		self.get_env().is_null(self, cap)
+	}
+
+	fn monitor(&'a self, cap: &Capability) -> Result<JavaMonitor<'a, Self>, JniError> where Self: Sized {
+		JavaMonitor::new(self, cap)
+	}
+}
+
+#[derive(Debug)]
+pub struct JavaMonitor<'a, T: 'a + JObject<'a>> {
+	obj: &'a T,
+}
+
+impl<'a, T: 'a + JObject<'a>> JavaMonitor<'a, T> {
+	fn new(obj: &'a T, cap: &Capability) -> Result<JavaMonitor<'a, T>, JniError> {
+		let err = obj.get_env().monitor_enter(obj, cap);
+		if err != JniError::JNI_OK {
+			Err(err)
+		} else {
+			Ok(JavaMonitor {
+				obj: obj,
+			})
+		}
+	}
+}
+
+impl<'a, T: 'a + JObject<'a>> Drop for JavaMonitor<'a, T> {
+	fn drop(&mut self) {
+		let env = self.obj.get_env();
+		match env.exception_check() {
+			Ok(cap) => env.monitor_exit(self.obj, &cap),
+			Err(_) => panic!("Can't call JNI method with pending exception."),
+		};
 	}
 }
 
@@ -895,7 +919,11 @@ macro_rules! impl_jobject(
 		// TODO: 'b MUST be == 'a
 		impl<'a, 'b, R: 'b + JObject<'b>> PartialEq<R> for $cls<'a> {
 			fn eq(&self, other: &R) -> bool {
-				self.get_env().is_same_object(self, other)
+				let env = self.get_env();
+				match env.exception_check() {
+					Ok(cap) => env.is_same_object(self, other, &cap),
+					Err(_) => panic!("Can't call JNI method with pending exception."),
+				}
 			}
 		}
 
@@ -1145,7 +1173,11 @@ impl<'a, T: 'a + JObject<'a>> Drop for JavaArray<'a, T> {
 
 impl<'a, T: 'a + JObject<'a>, R: 'a + JObject<'a>> PartialEq<R> for JavaArray<'a, T> {
 	fn eq(&self, other: &R) -> bool {
-		self.get_env().is_same_object(self, other)
+		let env = self.get_env();
+		match env.exception_check() {
+			Ok(cap) => env.is_same_object(self, other, &cap),
+			Err(_) => panic!("Can't call JNI method with pending exception."),
+		}
 	}
 }
 
