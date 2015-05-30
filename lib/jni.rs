@@ -584,7 +584,6 @@ impl<'a> JavaEnv<'a> {
 		unsafe { JObject::from_unsafe(self, r) }
 	}
 
-	// TODO: 'b MUST be == 'a
 	fn is_same_object<'b, 'c, T1: 'b + JObject<'b>, T2: 'c + JObject<'c>>(&self, obj1: &T1, obj2: &T2, _cap: &Capability) -> bool {
 		assert!(obj1.get_env().jvm() == obj2.get_env().jvm());
 		unsafe {
@@ -746,6 +745,18 @@ impl<'a> JavaEnv<'a> {
 			}
 		}
 		res
+	}
+
+	fn new_direct_byte_buffer(&'a self, capacity: usize, cap: Capability) -> JniResult<JavaDirectByteBuffer<'a>> {
+		let mut buf = Vec::with_capacity(capacity);
+		unsafe { buf.set_len(capacity) };
+		let (obj, _) = unsafe { (((**self.ptr).NewDirectByteBuffer)(self.ptr, buf.as_mut_ptr() as *mut ::libc::c_void, capacity as jlong), cap) };
+		// here `cap` is taken, we can't call any Jni methods
+		if obj == 0 as jobject {
+			Err(Exception::new())
+		} else {
+			Ok(( unsafe { JavaDirectByteBuffer::from_unsafe_buf(self, obj, buf) }, Capability::new()))
+		}
 	}
 }
 
@@ -916,7 +927,6 @@ macro_rules! impl_jobject(
 			}
 		}
 
-		// TODO: 'b MUST be == 'a
 		impl<'a, 'b, R: 'b + JObject<'b>> PartialEq<R> for $cls<'a> {
 			fn eq(&self, other: &R) -> bool {
 				let env = self.get_env();
@@ -1135,6 +1145,84 @@ impl<'a> fmt::Debug for JavaStringChars<'a> {
 impl<'a> JavaStringChars<'a> {
 	fn to_str(&self) -> Option<string::String> {
 		unsafe { JavaChars::from_raw_vec(CStr::from_ptr(self.chars).to_bytes_with_nul().to_vec()) }.to_string()
+	}
+}
+
+#[derive(Debug)]
+pub struct JavaDirectByteBuffer<'a> {
+	env: &'a JavaEnv<'a>,
+	ptr: jobject,
+	buf: Vec<u8>,
+}
+
+impl<'a> JavaDirectByteBuffer<'a> {
+	pub fn new<'b>(env: &'b JavaEnv<'b>, capacity: usize, cap: Capability) -> JniResult<JavaDirectByteBuffer<'b>> {
+		env.new_direct_byte_buffer(capacity, cap)
+	}
+
+	unsafe fn from_unsafe_buf(env: &'a JavaEnv<'a>, ptr: jobject, buf: Vec<u8>) -> JavaDirectByteBuffer<'a> {
+		JavaDirectByteBuffer {
+			env: env,
+			ptr: ptr,
+			buf: buf,
+		}
+	}
+
+	pub fn as_ptr(&self) -> *const ::libc::c_void {
+		self.buf.as_ptr() as *const ::libc::c_void
+	}
+
+	pub fn as_mut_ptr(&mut self) -> *mut ::libc::c_void {
+		self.buf.as_mut_ptr() as *mut ::libc::c_void
+	}
+
+	pub fn capacity(&self) -> usize {
+		self.buf.capacity()
+	}
+}
+
+impl<'a> Drop for JavaDirectByteBuffer<'a> {
+	fn drop(&mut self) {
+		let env = self.get_env();
+		match env.exception_check() {
+			Ok(cap) => env.delete_local_ref(self, &cap),
+			Err(_) => panic!("Can't call JNI method with pending exception."),
+		}
+	}
+}
+
+impl<'a, 'b, R: 'b + JObject<'b>> PartialEq<R> for JavaDirectByteBuffer<'a> {
+	fn eq(&self, other: &R) -> bool {
+		let env = self.get_env();
+		match env.exception_check() {
+			Ok(cap) => env.is_same_object(self, other, &cap),
+			Err(_) => panic!("Can't call JNI method with pending exception."),
+		}
+	}
+}
+
+impl<'a> Eq for JavaDirectByteBuffer<'a> {}
+
+impl<'a> JObject<'a> for JavaDirectByteBuffer<'a> {
+	fn get_env(&self) -> &'a JavaEnv<'a> {
+		self.env
+	}
+
+	fn get_obj(&self) -> jobject {
+		self.ptr
+	}
+
+	fn ref_type(&self) -> RefType {
+		RefType::Local
+	}
+
+	unsafe fn from_unsafe_type(env: &'a JavaEnv<'a>, ptr: jobject, typ: RefType) -> JavaDirectByteBuffer<'a> {
+		assert!(typ == RefType::Local);
+		JavaDirectByteBuffer {
+			env: env,
+			ptr: ptr,
+			buf: Vec::new(),
+		}
 	}
 }
 
