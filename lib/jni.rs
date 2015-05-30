@@ -432,7 +432,7 @@ impl<'a> JavaEnv<'a> {
 	}
 
 	/// Defines a Java class from a name, ClassLoader, buffer, and length
-	pub fn define_class<T: 'a + JObject<'a>>(&self, name: &str, loader: &T, buf: &[u8], cap: Capability) -> JniResult<JavaClass> {
+	fn define_class<T: 'a + JObject<'a>>(&self, name: &str, loader: &T, buf: &[u8], cap: Capability) -> JniResult<JavaClass> {
 		let jname = JavaChars::new(name);
 		let (obj, _) = unsafe {
 			(((**self.ptr).DefineClass)(self.ptr, jname.as_ptr(), loader.get_obj(), buf.as_ptr() as *const jbyte, buf.len() as jsize), cap)
@@ -447,7 +447,7 @@ impl<'a> JavaEnv<'a> {
 
 	/// Takes a string and returns a Java class if successfull.
 	/// Returns `Err` on failure.
-	pub fn find_class(&self, name: &str, cap: Capability) -> JniResult<JavaClass> {
+	fn find_class(&self, name: &str, cap: Capability) -> JniResult<JavaClass> {
 		let jname = JavaChars::new(name);
 		let (obj, _) = unsafe {
 			(((**self.ptr).FindClass)(self.ptr, jname.as_ptr()), cap)
@@ -461,7 +461,7 @@ impl<'a> JavaEnv<'a> {
 	}
 
 	/// Finds the class of the given object
-	pub fn get_object_class<T: 'a + JObject<'a>>(&'a self, obj: &T, _cap: &Capability) -> JavaClass<'a> {
+	fn get_object_class<T: 'a + JObject<'a>>(&'a self, obj: &T, _cap: &Capability) -> JavaClass<'a> {
 		let cls = unsafe {
 			((**self.ptr).GetObjectClass)(self.ptr, obj.get_obj())
 		};
@@ -471,7 +471,7 @@ impl<'a> JavaEnv<'a> {
 	}
 
 	/// Finds the superclass of the given class
-	pub fn get_super_class(&self, sub: &'a JavaClass<'a>, _cap: &Capability) -> Option<JavaClass> {
+	fn get_super_class(&self, sub: &'a JavaClass<'a>, _cap: &Capability) -> Option<JavaClass> {
 		let obj = unsafe {
 			((**self.ptr).GetSuperclass)(self.ptr, sub.ptr)
 		};
@@ -479,7 +479,7 @@ impl<'a> JavaEnv<'a> {
 	}
 
 	/// Check if a class can be assigned to another
-	pub fn is_assignable_from(&self, sub: &JavaClass, sup: &JavaClass, _cap: &Capability) -> bool {
+	fn is_assignable_from(&self, sub: &JavaClass, sup: &JavaClass, _cap: &Capability) -> bool {
 		unsafe {
 			((**self.ptr).IsAssignableFrom)(self.ptr, sub.ptr, sup.ptr) == JNI_TRUE
 		}
@@ -973,12 +973,20 @@ impl<'a> JavaClass<'a> {
 		self.env.get_super_class(self, cap)
 	}
 
+	pub fn is_assignable_from(&self, cls: &JavaClass<'a>, cap: &Capability) -> bool {
+		self.env.is_assignable_from(self, cls, cap)
+	}
+
 	pub fn alloc(&'a self, cap: Capability) -> JniResult<JavaObject<'a>> {
 		self.env.alloc_object(self, cap)
 	}
 
 	pub fn find<'b>(env: &'b JavaEnv<'b>, name: &str, cap: Capability) -> JniResult<JavaClass<'b>> {
 		env.find_class(name, cap)
+	}
+
+	pub fn define<'b, T: 'b + JObject<'b>>(env: &'b JavaEnv<'b>, name: &str, loader: &T, buf: &[u8], cap: Capability) -> JniResult<JavaClass<'b>> {
+		env.define_class(name, loader, buf, cap)
 	}
 }
 
