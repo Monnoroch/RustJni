@@ -480,6 +480,7 @@ impl<'a> JavaEnv<'a> {
 
 	/// Check if a class can be assigned to another
 	fn is_assignable_from(&self, sub: &JavaClass, sup: &JavaClass, _cap: &Capability) -> bool {
+		assert!(sub.jvm() == sup.jvm());
 		unsafe {
 			((**self.ptr).IsAssignableFrom)(self.ptr, sub.ptr, sup.ptr) == JNI_TRUE
 		}
@@ -499,10 +500,10 @@ impl<'a> JavaEnv<'a> {
 		}
 	}
 
-	fn throw_new(&self, clazz: &JavaClass, msg: &str, cap: Capability) -> Result<Exception, JniError> {
+	fn throw_new(&self, cls: &JavaClass, msg: &str, cap: Capability) -> Result<Exception, JniError> {
 		let jmsg = JavaChars::new(msg);
 		let (err, _) = unsafe {
-			(((**self.ptr).ThrowNew)(self.ptr, clazz.ptr, jmsg.as_ptr()), cap)
+			(((**self.ptr).ThrowNew)(self.ptr, cls.ptr, jmsg.as_ptr()), cap)
 		};
 		// here `cap` is taken, we can't call any Jni methods
 		if err == JniError::JNI_OK {
@@ -585,15 +586,15 @@ impl<'a> JavaEnv<'a> {
 	}
 
 	fn is_same_object<'b, 'c, T1: 'b + JObject<'b>, T2: 'c + JObject<'c>>(&self, obj1: &T1, obj2: &T2, _cap: &Capability) -> bool {
-		assert!(obj1.get_env().jvm() == obj2.get_env().jvm());
+		assert!(obj1.jvm() == obj2.jvm());
 		unsafe {
 			((**self.ptr).IsSameObject)(self.ptr, obj1.get_obj(), obj2.get_obj()) == JNI_TRUE
 		}
 	}
 
-	fn is_null<'b, T: 'b + JObject<'b>>(&self, obj1: &T, _cap: &Capability) -> bool {
+	fn is_null<'b, T: 'b + JObject<'b>>(&self, obj: &T, _cap: &Capability) -> bool {
 		unsafe {
-			((**self.ptr).IsSameObject)(self.ptr, obj1.get_obj(), 0 as jobject) == JNI_TRUE
+			((**self.ptr).IsSameObject)(self.ptr, obj.get_obj(), 0 as jobject) == JNI_TRUE
 		}
 	}
 
@@ -642,9 +643,9 @@ impl<'a> JavaEnv<'a> {
 		}
 	}
 
-	fn alloc_object(&self, clazz: &JavaClass, cap: Capability) -> JniResult<JavaObject> {
+	fn alloc_object(&self, cls: &JavaClass, cap: Capability) -> JniResult<JavaObject> {
 		let (obj, _) = unsafe {
-			(((**self.ptr).AllocObject)(self.ptr, clazz.ptr), cap)
+			(((**self.ptr).AllocObject)(self.ptr, cls.ptr), cap)
 		};
 		// here `cap` is taken, we can't call any Jni methods
 		if obj == 0 as jobject {
@@ -664,9 +665,10 @@ impl<'a> JavaEnv<'a> {
 		unsafe { ((**self.ptr).MonitorExit)(self.ptr, obj.get_obj()) }
 	}
 
-	fn is_instance_of<T: 'a + JObject<'a>>(&self, obj: &T, clazz: &JavaClass, _cap: &Capability) -> bool {
+	fn is_instance_of<T: 'a + JObject<'a>>(&self, obj: &T, cls: &JavaClass, _cap: &Capability) -> bool {
+		assert!(obj.jvm() == cls.jvm());
 		unsafe {
-			((**self.ptr).IsInstanceOf)(self.ptr, obj.get_obj(), clazz.ptr) == JNI_TRUE
+			((**self.ptr).IsInstanceOf)(self.ptr, obj.get_obj(), cls.ptr) == JNI_TRUE
 		}
 	}
 
@@ -771,8 +773,9 @@ impl<'a> JavaEnv<'a> {
 		unsafe { ((**self.ptr).GetArrayLength)(self.ptr, arr.get_obj() as jarray) as usize }
 	}
 
-	fn new_object_array<T: 'a + JObject<'a>>(&'a self, len: usize, clazz: &JavaClass<'a>, obj: &T, cap: Capability) -> JniResult<JavaArray<'a, T>> {
-		let (r, _) = unsafe { (((**self.ptr).NewObjectArray)(self.ptr, len as jsize, clazz.get_obj() as jclass, obj.get_obj() as jarray), cap) };
+	fn new_object_array<T: 'a + JObject<'a>>(&'a self, len: usize, cls: &JavaClass<'a>, obj: &T, cap: Capability) -> JniResult<JavaArray<'a, T>> {
+		assert!(obj.jvm() == cls.jvm());
+		let (r, _) = unsafe { (((**self.ptr).NewObjectArray)(self.ptr, len as jsize, cls.get_obj() as jclass, obj.get_obj() as jarray), cap) };
 		if r == 0 as jobjectArray {
 			Err(Exception::new())
 		} else {
@@ -780,8 +783,8 @@ impl<'a> JavaEnv<'a> {
 		}
 	}
 
-	fn new_null_object_array<T: 'a + JObject<'a>>(&'a self, len: usize, clazz: &JavaClass<'a>, cap: Capability) -> JniResult<JavaArray<'a, T>> {
-		let (r, _) = unsafe { (((**self.ptr).NewObjectArray)(self.ptr, len as jsize, clazz.get_obj() as jclass, 0 as jarray), cap) };
+	fn new_null_object_array<T: 'a + JObject<'a>>(&'a self, len: usize, cls: &JavaClass<'a>, cap: Capability) -> JniResult<JavaArray<'a, T>> {
+		let (r, _) = unsafe { (((**self.ptr).NewObjectArray)(self.ptr, len as jsize, cls.get_obj() as jclass, 0 as jarray), cap) };
 		if r == 0 as jobjectArray {
 			Err(Exception::new())
 		} else {
@@ -792,8 +795,7 @@ impl<'a> JavaEnv<'a> {
 
 impl<'a> PartialEq for JavaEnv<'a> {
 	fn eq(&self, r: &Self) -> bool {
-		assert!(self.jvm == r.jvm); // can't compare envs from different VMs.
-		self.ptr == r.ptr
+		self.jvm == r.jvm && self.ptr == r.ptr
 	}
 }
 
@@ -836,6 +838,10 @@ pub trait JObject<'a>: Drop {
 	fn get_env(&self) -> &'a JavaEnv<'a>;
 	fn get_obj(&self) -> jobject;
 	fn ref_type(&self) -> RefType;
+
+	fn jvm(&self) -> &'a JavaVM {
+		self.get_env().jvm()
+	}
 
 	unsafe fn from_unsafe_type(env: &'a JavaEnv<'a>, ptr: jobject, typ: RefType) -> Self;
 
@@ -898,8 +904,8 @@ pub trait JObject<'a>: Drop {
 		Ok((r, obj.1))
 	}
 
-	fn is_instance_of(&self, clazz: &JavaClass, cap: &Capability) -> bool where Self: 'a + Sized {
-		self.get_env().is_instance_of(self, clazz, cap)
+	fn is_instance_of(&self, cls: &JavaClass, cap: &Capability) -> bool where Self: 'a + Sized {
+		self.get_env().is_instance_of(self, cls, cap)
 	}
 
 	fn is_null(&self, cap: &Capability) -> bool where Self: 'a + Sized {
@@ -1067,8 +1073,8 @@ impl<'a> JavaThrowable<'a> {
 		env.throw(obj, cap)
 	}
 
-	pub fn throw_new<'b>(env: &'b JavaEnv<'b>, clazz: &JavaClass<'b>, msg: &str, cap: Capability) -> Result<Exception, JniError> {
-		env.throw_new(clazz, msg, cap)
+	pub fn throw_new<'b>(env: &'b JavaEnv<'b>, cls: &JavaClass<'b>, msg: &str, cap: Capability) -> Result<Exception, JniError> {
+		env.throw_new(cls, msg, cap)
 	}
 
 	pub fn check<'b>(env: &'b JavaEnv<'b>) -> Result<Capability, Exception> {
@@ -1276,12 +1282,12 @@ pub struct JavaArray<'a, T: 'a + JObject<'a>> {
 }
 
 impl<'a, T: 'a + JObject<'a>> JavaArray<'a, T> {
-	pub fn new(env: &'a JavaEnv<'a>, len: usize, clazz: &JavaClass<'a>, obj: &T, cap: Capability) -> JniResult<JavaArray<'a, T>> {
-		env.new_object_array(len, clazz, obj, cap)
+	pub fn new(env: &'a JavaEnv<'a>, len: usize, cls: &JavaClass<'a>, obj: &T, cap: Capability) -> JniResult<JavaArray<'a, T>> {
+		env.new_object_array(len, cls, obj, cap)
 	}
 
-	pub fn new_null(env: &'a JavaEnv<'a>, len: usize, clazz: &JavaClass<'a>, cap: Capability) -> JniResult<JavaArray<'a, T>> {
-		env.new_null_object_array(len, clazz, cap)
+	pub fn new_null(env: &'a JavaEnv<'a>, len: usize, cls: &JavaClass<'a>, cap: Capability) -> JniResult<JavaArray<'a, T>> {
+		env.new_null_object_array(len, cls, cap)
 	}
 
 	pub fn len(&self, cap: &Capability) -> usize {
