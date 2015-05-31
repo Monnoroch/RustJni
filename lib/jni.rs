@@ -92,6 +92,159 @@ impl Exception {
 
 pub type JniResult<T> = Result<(T, Capability), Exception>;
 
+
+trait JPrimitive {
+	type Type;
+	type ArrType;
+
+	fn repr(&self) -> Self::Type;
+	fn from(val: Self::Type) -> Self;
+}
+
+impl JPrimitive for jboolean {
+	type Type = bool;
+	type ArrType = jbooleanArray;
+
+	fn repr(&self) -> Self::Type {
+		*self == JNI_TRUE
+	}
+
+	fn from(val: Self::Type) -> Self {
+		if val {
+			JNI_TRUE
+		} else {
+			JNI_FALSE
+		}
+	}
+}
+
+impl JPrimitive for jbyte {
+	type Type = u8;
+	type ArrType = jbyteArray;
+
+	fn repr(&self) -> Self::Type {
+		*self as Self::Type
+	}
+
+	fn from(val: Self::Type) -> Self {
+		val as Self
+	}
+}
+
+impl JPrimitive for jchar {
+	type Type = char;
+	type ArrType = jcharArray;
+
+	fn repr(&self) -> Self::Type {
+		::std::char::from_u32(*self as u32).unwrap() // NOTE: should always be ok
+	}
+
+	fn from(val: Self::Type) -> Self {
+		val as Self // NOTE: should always be ok
+	}
+}
+
+impl JPrimitive for jshort {
+	type Type = i16;
+	type ArrType = jshortArray;
+
+	fn repr(&self) -> Self::Type {
+		*self as Self::Type
+	}
+
+	fn from(val: Self::Type) -> Self {
+		val as Self
+	}
+}
+
+impl JPrimitive for jint {
+	type Type = i32;
+	type ArrType = jintArray;
+
+	fn repr(&self) -> Self::Type {
+		*self as Self::Type
+	}
+
+	fn from(val: Self::Type) -> Self {
+		val as Self
+	}
+}
+
+impl JPrimitive for jlong {
+	type Type = i64;
+	type ArrType = jlongArray;
+
+	fn repr(&self) -> Self::Type {
+		*self as Self::Type
+	}
+
+	fn from(val: Self::Type) -> Self {
+		val as Self
+	}
+}
+
+impl JPrimitive for jfloat {
+	type Type = f32;
+	type ArrType = jfloatArray;
+
+	fn repr(&self) -> Self::Type {
+		*self as Self::Type
+	}
+
+	fn from(val: Self::Type) -> Self {
+		val as Self
+	}
+}
+
+impl JPrimitive for jdouble {
+	type Type = f64;
+	type ArrType = jdoubleArray;
+
+	fn repr(&self) -> Self::Type {
+		*self as Self::Type
+	}
+
+	fn from(val: Self::Type) -> Self {
+		val as Self
+	}
+}
+
+trait RPrimitive {
+	type JType: JPrimitive;
+}
+
+impl RPrimitive for bool {
+	type JType = jboolean;
+}
+
+impl RPrimitive for u8 {
+	type JType = jbyte;
+}
+
+impl RPrimitive for char {
+	type JType = jchar;
+}
+
+impl RPrimitive for i16 {
+	type JType = jshort;
+}
+
+impl RPrimitive for i32 {
+	type JType = jint;
+}
+
+impl RPrimitive for i64 {
+	type JType = jlong;
+}
+
+impl RPrimitive for f32 {
+	type JType = jfloat;
+}
+
+impl RPrimitive for f64 {
+	type JType = jdouble;
+}
+
 /// Stores an option for the JVM
 #[allow(raw_pointer_derive)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -769,12 +922,11 @@ impl<'a> JavaEnv<'a> {
 		unsafe { ((**self.ptr).GetDirectBufferCapacity)(self.ptr, buf.get_obj()) as usize }
 	}
 
-	fn array_length<T: 'a + JObject<'a>>(&self, arr: &JavaArray<'a, T>, _cap: &Capability) -> usize {
+	fn array_length<T: 'a + JArrayElem<'a>>(&self, arr: &JavaArray<'a, T>, _cap: &Capability) -> usize {
 		unsafe { ((**self.ptr).GetArrayLength)(self.ptr, arr.get_obj() as jarray) as usize }
 	}
 
-	fn new_object_array<T: 'a + JObject<'a>>(&'a self, len: usize, cls: &JavaClass<'a>, obj: &T, cap: Capability) -> JniResult<JavaArray<'a, T>> {
-		assert!(obj.jvm() == cls.jvm());
+	fn new_object_array<T: 'a + JArrayElem<'a> + JObject<'a>>(&'a self, len: usize, cls: &JavaClass<'a>, obj: &T, cap: Capability) -> JniResult<JavaArray<'a, T>> {
 		let (r, _) = unsafe { (((**self.ptr).NewObjectArray)(self.ptr, len as jsize, cls.get_obj() as jclass, obj.get_obj() as jarray), cap) };
 		if r == 0 as jobjectArray {
 			Err(Exception::new())
@@ -783,13 +935,133 @@ impl<'a> JavaEnv<'a> {
 		}
 	}
 
-	fn new_null_object_array<T: 'a + JObject<'a>>(&'a self, len: usize, cls: &JavaClass<'a>, cap: Capability) -> JniResult<JavaArray<'a, T>> {
-		let (r, _) = unsafe { (((**self.ptr).NewObjectArray)(self.ptr, len as jsize, cls.get_obj() as jclass, 0 as jarray), cap) };
-		if r == 0 as jobjectArray {
+	fn get_object_array<T: 'a + JArrayElem<'a> + JObject<'a>>(&'a self, arr: &'a JavaArray<'a, T>, n: usize, cap: Capability) -> JniResult<T> {
+		let (r, _) = unsafe { (((**self.ptr).GetObjectArrayElement)(self.ptr, arr.get_obj() as jobjectArray, n as jsize), cap) };
+		if r == 0 as jobject {
 			Err(Exception::new())
 		} else {
 			Ok((unsafe { JObject::from_unsafe(self, r) }, Capability::new()))
 		}
+	}
+
+	fn new_boolean_array(&'a self, len: usize, cap: Capability) -> JniResult<JavaArray<'a, <jboolean as JPrimitive>::Type>> {
+		let (r, _) = unsafe { (((**self.ptr).NewBooleanArray)(self.ptr, len as jsize), cap) };
+		if r == 0 as <jboolean as JPrimitive>::ArrType {
+			Err(Exception::new())
+		} else {
+			Ok((unsafe { JObject::from_unsafe(self, r) }, Capability::new()))
+		}
+	}
+
+	fn get_boolean_array(&'a self, arr: &'a JavaArray<'a, <jboolean as JPrimitive>::Type>, n: usize, cap: Capability) -> <jboolean as JPrimitive>::Type {
+		let mut val = <jboolean as JPrimitive>::from(false);
+		let _ = unsafe { ((**self.ptr).GetBooleanArrayRegion)(self.ptr, arr.get_obj() as <jboolean as JPrimitive>::ArrType, n as jsize, 1 as jsize, &mut val as *mut jboolean); cap };
+		val.repr()
+	}
+
+	fn new_byte_array(&'a self, len: usize, cap: Capability) -> JniResult<JavaArray<'a, <jbyte as JPrimitive>::Type>> {
+		let (r, _) = unsafe { (((**self.ptr).NewByteArray)(self.ptr, len as jsize), cap) };
+		if r == 0 as <jbyte as JPrimitive>::ArrType {
+			Err(Exception::new())
+		} else {
+			Ok((unsafe { JObject::from_unsafe(self, r) }, Capability::new()))
+		}
+	}
+
+	fn get_byte_array(&'a self, arr: &'a JavaArray<'a, <jbyte as JPrimitive>::Type>, n: usize, cap: Capability) -> <jbyte as JPrimitive>::Type {
+		let mut val = <jbyte as JPrimitive>::from(0);
+		let _ = unsafe { ((**self.ptr).GetByteArrayRegion)(self.ptr, arr.get_obj() as <jbyte as JPrimitive>::ArrType, n as jsize, 1 as jsize, &mut val as *mut jbyte); cap };
+		val.repr()
+	}
+
+	fn new_char_array(&'a self, len: usize, cap: Capability) -> JniResult<JavaArray<'a, <jchar as JPrimitive>::Type>> {
+		let (r, _) = unsafe { (((**self.ptr).NewCharArray)(self.ptr, len as jsize), cap) };
+		if r == 0 as <jchar as JPrimitive>::ArrType {
+			Err(Exception::new())
+		} else {
+			Ok((unsafe { JObject::from_unsafe(self, r) }, Capability::new()))
+		}
+	}
+
+	fn get_char_array(&'a self, arr: &'a JavaArray<'a, <jchar as JPrimitive>::Type>, n: usize, cap: Capability) -> <jchar as JPrimitive>::Type {
+		let mut val = <jchar as JPrimitive>::from('\0');
+		let _ = unsafe { ((**self.ptr).GetCharArrayRegion)(self.ptr, arr.get_obj() as <jchar as JPrimitive>::ArrType, n as jsize, 1 as jsize, &mut val as *mut jchar); cap };
+		val.repr()
+	}
+
+	fn new_short_array(&'a self, len: usize, cap: Capability) -> JniResult<JavaArray<'a, <jshort as JPrimitive>::Type>> {
+		let (r, _) = unsafe { (((**self.ptr).NewShortArray)(self.ptr, len as jsize), cap) };
+		if r == 0 as <jshort as JPrimitive>::ArrType {
+			Err(Exception::new())
+		} else {
+			Ok((unsafe { JObject::from_unsafe(self, r) }, Capability::new()))
+		}
+	}
+
+	fn get_short_array(&'a self, arr: &'a JavaArray<'a, <jshort as JPrimitive>::Type>, n: usize, cap: Capability) -> <jshort as JPrimitive>::Type {
+		let mut val = <jshort as JPrimitive>::from(0);
+		let _ = unsafe { ((**self.ptr).GetShortArrayRegion)(self.ptr, arr.get_obj() as <jshort as JPrimitive>::ArrType, n as jsize, 1 as jsize, &mut val as *mut jshort); cap };
+		val.repr()
+	}
+
+	fn new_int_array(&'a self, len: usize, cap: Capability) -> JniResult<JavaArray<'a, <jint as JPrimitive>::Type>> {
+		let (r, _) = unsafe { (((**self.ptr).NewIntArray)(self.ptr, len as jsize), cap) };
+		if r == 0 as <jint as JPrimitive>::ArrType {
+			Err(Exception::new())
+		} else {
+			Ok((unsafe { JObject::from_unsafe(self, r) }, Capability::new()))
+		}
+	}
+
+	fn get_int_array(&'a self, arr: &'a JavaArray<'a, <jint as JPrimitive>::Type>, n: usize, cap: Capability) -> <jint as JPrimitive>::Type {
+		let mut val = <jint as JPrimitive>::from(0);
+		let _ = unsafe { ((**self.ptr).GetIntArrayRegion)(self.ptr, arr.get_obj() as <jint as JPrimitive>::ArrType, n as jsize, 1 as jsize, &mut val as *mut jint); cap };
+		val.repr()
+	}
+
+	fn new_long_array(&'a self, len: usize, cap: Capability) -> JniResult<JavaArray<'a, <jlong as JPrimitive>::Type>> {
+		let (r, _) = unsafe { (((**self.ptr).NewLongArray)(self.ptr, len as jsize), cap) };
+		if r == 0 as <jlong as JPrimitive>::ArrType {
+			Err(Exception::new())
+		} else {
+			Ok((unsafe { JObject::from_unsafe(self, r) }, Capability::new()))
+		}
+	}
+
+	fn get_long_array(&'a self, arr: &'a JavaArray<'a, <jlong as JPrimitive>::Type>, n: usize, cap: Capability) -> <jlong as JPrimitive>::Type {
+		let mut val = <jlong as JPrimitive>::from(0);
+		let _ = unsafe { ((**self.ptr).GetLongArrayRegion)(self.ptr, arr.get_obj() as <jlong as JPrimitive>::ArrType, n as jsize, 1 as jsize, &mut val as *mut jlong); cap };
+		val.repr()
+	}
+
+	fn new_float_array(&'a self, len: usize, cap: Capability) -> JniResult<JavaArray<'a, <jfloat as JPrimitive>::Type>> {
+		let (r, _) = unsafe { (((**self.ptr).NewFloatArray)(self.ptr, len as jsize), cap) };
+		if r == 0 as <jfloat as JPrimitive>::ArrType {
+			Err(Exception::new())
+		} else {
+			Ok((unsafe { JObject::from_unsafe(self, r) }, Capability::new()))
+		}
+	}
+
+	fn get_float_array(&'a self, arr: &'a JavaArray<'a, <jfloat as JPrimitive>::Type>, n: usize, cap: Capability) -> <jfloat as JPrimitive>::Type {
+		let mut val = <jfloat as JPrimitive>::from(0.0);
+		let _ = unsafe { ((**self.ptr).GetFloatArrayRegion)(self.ptr, arr.get_obj() as <jfloat as JPrimitive>::ArrType, n as jsize, 1 as jsize, &mut val as *mut jfloat); cap };
+		val.repr()
+	}
+
+	fn new_double_array(&'a self, len: usize, cap: Capability) -> JniResult<JavaArray<'a, <jdouble as JPrimitive>::Type>> {
+		let (r, _) = unsafe { (((**self.ptr).NewDoubleArray)(self.ptr, len as jsize), cap) };
+		if r == 0 as <jdouble as JPrimitive>::ArrType {
+			Err(Exception::new())
+		} else {
+			Ok((unsafe { JObject::from_unsafe(self, r) }, Capability::new()))
+		}
+	}
+
+	fn get_double_array(&'a self, arr: &'a JavaArray<'a, <jdouble as JPrimitive>::Type>, n: usize, cap: Capability) -> <jdouble as JPrimitive>::Type {
+		let mut val = <jdouble as JPrimitive>::from(0.0);
+		let _ = unsafe { ((**self.ptr).GetDoubleArrayRegion)(self.ptr, arr.get_obj() as <jdouble as JPrimitive>::ArrType, n as jsize, 1 as jsize, &mut val as *mut jdouble); cap };
+		val.repr()
 	}
 }
 
@@ -834,7 +1106,7 @@ pub enum RefType {
 	Weak,
 }
 
-pub trait JObject<'a>: Drop {
+pub trait JObject<'a>: Eq + Drop {
 	fn get_env(&self) -> &'a JavaEnv<'a>;
 	fn get_obj(&self) -> jobject;
 	fn ref_type(&self) -> RefType;
@@ -994,6 +1266,19 @@ macro_rules! impl_jobject(
 					ptr: ptr as $native,
 					rtype: typ,
 				}
+			}
+		}
+
+		impl<'a> JArrayElem<'a> for $cls<'a> {
+			type JniType = $cls<'a>;
+
+			fn new_array(env: &'a JavaEnv<'a>, len: usize, val: &$cls<'a>, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
+				let cls = val.get_class(&cap);
+				env.new_object_array(len, &cls, val, cap)
+			}
+
+			fn get(arr: &'a JavaArray<'a, Self>, n: usize, cap: Capability) -> JniResult<Self> {
+				arr.env.get_object_array(arr, n, cap)
 			}
 		}
 	);
@@ -1262,40 +1547,176 @@ impl<'a> JObject<'a> for JavaDirectByteBuffer<'a> {
 	}
 }
 
-// For future
-trait JavaPrimitive {}
+impl<'a> JArrayElem<'a> for JavaDirectByteBuffer<'a> {
+	type JniType = JavaDirectByteBuffer<'a>;
 
-impl JavaPrimitive for jboolean {}
-impl JavaPrimitive for jbyte {}
-impl JavaPrimitive for jchar {}
-impl JavaPrimitive for jshort {}
-impl JavaPrimitive for jint {}
-impl JavaPrimitive for jlong {}
-impl JavaPrimitive for jfloat {}
-impl JavaPrimitive for jdouble {}
+	fn new_array(env: &'a JavaEnv<'a>, len: usize, val: &JavaDirectByteBuffer<'a>, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
+		let cls = val.get_class(&cap);
+		env.new_object_array(len, &cls, val, cap)
+	}
 
-pub struct JavaArray<'a, T: 'a + JObject<'a>> {
+	fn get(arr: &'a JavaArray<'a, Self>, n: usize, cap: Capability) -> JniResult<Self> {
+		arr.env.get_object_array(arr, n, cap)
+	}
+}
+
+pub trait JArrayElem<'a> {
+	type JniType: 'a;
+
+	fn new_array(env: &'a JavaEnv<'a>, len: usize, val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>>;
+	fn get(arr: &'a JavaArray<'a, Self>, n: usize, cap: Capability) -> JniResult<Self>;
+}
+
+impl<'a> JArrayElem<'a> for <jboolean as JPrimitive>::Type {
+	type JniType = jboolean;
+
+	fn new_array(env: &'a JavaEnv<'a>, len: usize, _val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
+		env.new_boolean_array(len, cap)
+	}
+
+	fn get(arr: &'a JavaArray<'a, Self>, n: usize, cap: Capability) -> JniResult<Self> {
+		let r = arr.env.get_boolean_array(arr, n, cap);
+		match arr.env.exception_check() {
+			Ok(cap) => Ok((r, cap)),
+			Err(ex) => Err(ex),
+		}
+	}
+}
+
+impl<'a> JArrayElem<'a> for <jbyte as JPrimitive>::Type {
+	type JniType = jbyte;
+
+	fn new_array(env: &'a JavaEnv<'a>, len: usize, _val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
+		env.new_byte_array(len, cap)
+	}
+
+	fn get(arr: &'a JavaArray<'a, Self>, n: usize, cap: Capability) -> JniResult<Self> {
+		let r = arr.env.get_byte_array(arr, n, cap);
+		match arr.env.exception_check() {
+			Ok(cap) => Ok((r, cap)),
+			Err(ex) => Err(ex),
+		}
+	}
+}
+
+impl<'a> JArrayElem<'a> for <jchar as JPrimitive>::Type {
+	type JniType = jchar;
+
+	fn new_array(env: &'a JavaEnv<'a>, len: usize, _val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
+		env.new_char_array(len, cap)
+	}
+
+	fn get(arr: &'a JavaArray<'a, Self>, n: usize, cap: Capability) -> JniResult<Self> {
+		let r = arr.env.get_char_array(arr, n, cap);
+		match arr.env.exception_check() {
+			Ok(cap) => Ok((r, cap)),
+			Err(ex) => Err(ex),
+		}
+	}
+}
+
+impl<'a> JArrayElem<'a> for <jshort as JPrimitive>::Type {
+	type JniType = jshort;
+
+	fn new_array(env: &'a JavaEnv<'a>, len: usize, _val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
+		env.new_short_array(len, cap)
+	}
+
+	fn get(arr: &'a JavaArray<'a, Self>, n: usize, cap: Capability) -> JniResult<Self> {
+		let r = arr.env.get_short_array(arr, n, cap);
+		match arr.env.exception_check() {
+			Ok(cap) => Ok((r, cap)),
+			Err(ex) => Err(ex),
+		}
+	}
+}
+
+impl<'a> JArrayElem<'a> for <jint as JPrimitive>::Type {
+	type JniType = jint;
+
+	fn new_array(env: &'a JavaEnv<'a>, len: usize, _val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
+		env.new_int_array(len, cap)
+	}
+
+	fn get(arr: &'a JavaArray<'a, Self>, n: usize, cap: Capability) -> JniResult<Self> {
+		let r = arr.env.get_int_array(arr, n, cap);
+		match arr.env.exception_check() {
+			Ok(cap) => Ok((r, cap)),
+			Err(ex) => Err(ex),
+		}
+	}
+}
+
+impl<'a> JArrayElem<'a> for <jlong as JPrimitive>::Type {
+	type JniType = jlong;
+
+	fn new_array(env: &'a JavaEnv<'a>, len: usize, _val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
+		env.new_long_array(len, cap)
+	}
+
+	fn get(arr: &'a JavaArray<'a, Self>, n: usize, cap: Capability) -> JniResult<Self> {
+		let r = arr.env.get_long_array(arr, n, cap);
+		match arr.env.exception_check() {
+			Ok(cap) => Ok((r, cap)),
+			Err(ex) => Err(ex),
+		}
+	}
+}
+
+impl<'a> JArrayElem<'a> for <jfloat as JPrimitive>::Type {
+	type JniType = jfloat;
+
+	fn new_array(env: &'a JavaEnv<'a>, len: usize, _val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
+		env.new_float_array(len, cap)
+	}
+
+	fn get(arr: &'a JavaArray<'a, Self>, n: usize, cap: Capability) -> JniResult<Self> {
+		let r = arr.env.get_float_array(arr, n, cap);
+		match arr.env.exception_check() {
+			Ok(cap) => Ok((r, cap)),
+			Err(ex) => Err(ex),
+		}
+	}
+}
+
+impl<'a> JArrayElem<'a> for <jdouble as JPrimitive>::Type {
+	type JniType = jdouble;
+
+	fn new_array(env: &'a JavaEnv<'a>, len: usize, _val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
+		env.new_double_array(len, cap)
+	}
+
+	fn get(arr: &'a JavaArray<'a, Self>, n: usize, cap: Capability) -> JniResult<Self> {
+		let r = arr.env.get_double_array(arr, n, cap);
+		match arr.env.exception_check() {
+			Ok(cap) => Ok((r, cap)),
+			Err(ex) => Err(ex),
+		}
+	}
+}
+
+pub struct JavaArray<'a, T: 'a + JArrayElem<'a>> {
 	env: &'a JavaEnv<'a>,
 	ptr: jobjectArray,
 	rtype: RefType,
 	phantom: PhantomData<T>,
 }
 
-impl<'a, T: 'a + JObject<'a>> JavaArray<'a, T> {
-	pub fn new(env: &'a JavaEnv<'a>, len: usize, cls: &JavaClass<'a>, obj: &T, cap: Capability) -> JniResult<JavaArray<'a, T>> {
-		env.new_object_array(len, cls, obj, cap)
-	}
-
-	pub fn new_null(env: &'a JavaEnv<'a>, len: usize, cls: &JavaClass<'a>, cap: Capability) -> JniResult<JavaArray<'a, T>> {
-		env.new_null_object_array(len, cls, cap)
+impl<'a, T: 'a + JArrayElem<'a>> JavaArray<'a, T> {
+	pub fn new(env: &'a JavaEnv<'a>, len: usize, obj: &T, cap: Capability) -> JniResult<JavaArray<'a, T>> {
+		T::new_array(env, len, obj, cap)
 	}
 
 	pub fn len(&self, cap: &Capability) -> usize {
-		self.env.array_length(self, cap)
+		self.get_env().array_length(self, cap)
+	}
+
+	pub fn get(&'a self, n: usize, cap: Capability) -> JniResult<T> {
+		T::get(self, n, cap)
 	}
 }
 
-impl<'a, T: 'a + JObject<'a>> Drop for JavaArray<'a, T> {
+impl<'a, T: 'a + JArrayElem<'a>> Drop for JavaArray<'a, T> {
 	fn drop(&mut self) {
 		let env = self.get_env();
 		match env.exception_check() {
@@ -1309,7 +1730,7 @@ impl<'a, T: 'a + JObject<'a>> Drop for JavaArray<'a, T> {
 	}
 }
 
-impl<'a, 'b, T: 'a + JObject<'a>, R: 'b + JObject<'b>> PartialEq<R> for JavaArray<'a, T> {
+impl<'a, 'b, T: 'a + JArrayElem<'a>, R: 'b + JObject<'b>> PartialEq<R> for JavaArray<'a, T> {
 	fn eq(&self, other: &R) -> bool {
 		let env = self.get_env();
 		match env.exception_check() {
@@ -1319,9 +1740,9 @@ impl<'a, 'b, T: 'a + JObject<'a>, R: 'b + JObject<'b>> PartialEq<R> for JavaArra
 	}
 }
 
-impl<'a, T: 'a + JObject<'a>> Eq for JavaArray<'a, T> {}
+impl<'a, T: 'a + JArrayElem<'a>> Eq for JavaArray<'a, T> {}
 
-impl<'a, T: 'a + JObject<'a>> JObject<'a> for JavaArray<'a, T> {
+impl<'a, T: 'a + JArrayElem<'a>> JObject<'a> for JavaArray<'a, T> {
 	fn get_env(&self) -> &'a JavaEnv<'a> {
 		self.env
 	}
