@@ -758,6 +758,28 @@ impl<'a> JavaEnv<'a> {
 			Ok(( unsafe { JavaDirectByteBuffer::from_unsafe_buf(self, obj, buf) }, Capability::new()))
 		}
 	}
+
+	fn array_length<T: 'a + JObject<'a>>(&self, arr: &JavaArray<'a, T>, _cap: &Capability) -> usize {
+		unsafe { ((**self.ptr).GetArrayLength)(self.ptr, arr.get_obj() as jarray) as usize }
+	}
+
+	fn new_object_array<T: 'a + JObject<'a>>(&'a self, len: usize, clazz: &JavaClass<'a>, obj: &T, cap: Capability) -> JniResult<JavaArray<'a, T>> {
+		let (r, _) = unsafe { (((**self.ptr).NewObjectArray)(self.ptr, len as jsize, clazz.get_obj() as jclass, obj.get_obj() as jarray), cap) };
+		if r == 0 as jobjectArray {
+			Err(Exception::new())
+		} else {
+			Ok((unsafe { JObject::from_unsafe(self, r) }, Capability::new()))
+		}
+	}
+
+	fn new_null_object_array<T: 'a + JObject<'a>>(&'a self, len: usize, clazz: &JavaClass<'a>, cap: Capability) -> JniResult<JavaArray<'a, T>> {
+		let (r, _) = unsafe { (((**self.ptr).NewObjectArray)(self.ptr, len as jsize, clazz.get_obj() as jclass, 0 as jarray), cap) };
+		if r == 0 as jobjectArray {
+			Err(Exception::new())
+		} else {
+			Ok((unsafe { JObject::from_unsafe(self, r) }, Capability::new()))
+		}
+	}
 }
 
 impl<'a> PartialEq for JavaEnv<'a> {
@@ -1240,9 +1262,23 @@ impl JavaPrimitive for jdouble {}
 
 pub struct JavaArray<'a, T: 'a + JObject<'a>> {
 	env: &'a JavaEnv<'a>,
-	ptr: jarray,
+	ptr: jobjectArray,
 	rtype: RefType,
 	phantom: PhantomData<T>,
+}
+
+impl<'a, T: 'a + JObject<'a>> JavaArray<'a, T> {
+	pub fn new(env: &'a JavaEnv<'a>, len: usize, clazz: &JavaClass<'a>, obj: &T, cap: Capability) -> JniResult<JavaArray<'a, T>> {
+		env.new_object_array(len, clazz, obj, cap)
+	}
+
+	pub fn new_null(env: &'a JavaEnv<'a>, len: usize, clazz: &JavaClass<'a>, cap: Capability) -> JniResult<JavaArray<'a, T>> {
+		env.new_null_object_array(len, clazz, cap)
+	}
+
+	pub fn len(&self, cap: &Capability) -> usize {
+		self.env.array_length(self, cap)
+	}
 }
 
 impl<'a, T: 'a + JObject<'a>> Drop for JavaArray<'a, T> {
@@ -1259,7 +1295,7 @@ impl<'a, T: 'a + JObject<'a>> Drop for JavaArray<'a, T> {
 	}
 }
 
-impl<'a, T: 'a + JObject<'a>, R: 'a + JObject<'a>> PartialEq<R> for JavaArray<'a, T> {
+impl<'a, 'b, T: 'a + JObject<'a>, R: 'b + JObject<'b>> PartialEq<R> for JavaArray<'a, T> {
 	fn eq(&self, other: &R) -> bool {
 		let env = self.get_env();
 		match env.exception_check() {
