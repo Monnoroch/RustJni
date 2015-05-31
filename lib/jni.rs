@@ -759,6 +759,14 @@ impl<'a> JavaEnv<'a> {
 		}
 	}
 
+	fn get_direct_byte_buffer_address(&self, buf: &'a JavaDirectByteBuffer<'a>, _cap: &Capability) -> *mut ::libc::c_void {
+		unsafe { ((**self.ptr).GetDirectBufferAddress)(self.ptr, buf.get_obj()) }
+	}
+
+	fn get_direct_byte_buffer_capacity(&self, buf: &'a JavaDirectByteBuffer<'a>, _cap: &Capability) -> usize {
+		unsafe { ((**self.ptr).GetDirectBufferCapacity)(self.ptr, buf.get_obj()) as usize }
+	}
+
 	fn array_length<T: 'a + JObject<'a>>(&self, arr: &JavaArray<'a, T>, _cap: &Capability) -> usize {
 		unsafe { ((**self.ptr).GetArrayLength)(self.ptr, arr.get_obj() as jarray) as usize }
 	}
@@ -1190,16 +1198,16 @@ impl<'a> JavaDirectByteBuffer<'a> {
 		}
 	}
 
-	pub fn as_ptr(&self) -> *const ::libc::c_void {
-		self.buf.as_ptr() as *const ::libc::c_void
+	pub fn as_ptr(&self, cap: &Capability) -> *const ::libc::c_void {
+		self.env.get_direct_byte_buffer_address(self, cap) as *const ::libc::c_void
 	}
 
-	pub fn as_mut_ptr(&mut self) -> *mut ::libc::c_void {
-		self.buf.as_mut_ptr() as *mut ::libc::c_void
+	pub fn as_mut_ptr(&mut self, cap: &Capability) -> *mut ::libc::c_void {
+		self.env.get_direct_byte_buffer_address(self, cap)
 	}
 
-	pub fn capacity(&self) -> usize {
-		self.buf.capacity()
+	pub fn capacity(&self, cap: &Capability) -> usize {
+		self.env.get_direct_byte_buffer_capacity(self, cap)
 	}
 }
 
