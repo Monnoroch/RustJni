@@ -1314,7 +1314,7 @@ macro_rules! impl_jobject(
 		}
 
 		impl<'a> JArrayElem<'a> for $cls<'a> {
-			fn new_array(env: &'a JavaEnv<'a>, len: usize, val: &$cls<'a>, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
+			fn new_array(env: &'a JavaEnv<'a>, len: usize, val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
 				let cls = val.get_class(&cap);
 				env.new_object_array(len, &cls, val, cap)
 			}
@@ -1323,7 +1323,7 @@ macro_rules! impl_jobject(
 				arr.env.get_object_array(arr, n, cap)
 			}
 
-			fn set(arr: &'a JavaArray<'a, Self>, n: usize, val: &$cls<'a>, cap: Capability) {
+			fn set(arr: &'a JavaArray<'a, Self>, n: usize, val: &Self, cap: Capability) {
 				arr.env.set_object_array(arr, n, val, cap)
 			}
 		}
@@ -1594,7 +1594,7 @@ impl<'a> JObject<'a> for JavaDirectByteBuffer<'a> {
 }
 
 impl<'a> JArrayElem<'a> for JavaDirectByteBuffer<'a> {
-	fn new_array(env: &'a JavaEnv<'a>, len: usize, val: &JavaDirectByteBuffer<'a>, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
+	fn new_array(env: &'a JavaEnv<'a>, len: usize, val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
 		let cls = val.get_class(&cap);
 		env.new_object_array(len, &cls, val, cap)
 	}
@@ -1603,7 +1603,7 @@ impl<'a> JArrayElem<'a> for JavaDirectByteBuffer<'a> {
 		arr.env.get_object_array(arr, n, cap)
 	}
 
-	fn set(arr: &'a JavaArray<'a, Self>, n: usize, val: &JavaDirectByteBuffer<'a>, cap: Capability) {
+	fn set(arr: &'a JavaArray<'a, Self>, n: usize, val: &Self, cap: Capability) {
 		arr.env.set_object_array(arr, n, val, cap)
 	}
 }
@@ -1804,6 +1804,21 @@ impl<'a, 'b, T: 'a + JArrayElem<'a>, R: 'b + JObject<'b>> PartialEq<R> for JavaA
 			Ok(cap) => env.is_same_object(self, other, &cap),
 			Err(_) => panic!("Can't call JNI method with pending exception."),
 		}
+	}
+}
+
+impl<'a, T: 'a + JArrayElem<'a>> JArrayElem<'a> for JavaArray<'a, T> {
+	fn new_array(env: &'a JavaEnv<'a>, len: usize, val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
+		let cls = val.get_class(&cap);
+		env.new_object_array(len, &cls, val, cap)
+	}
+
+	fn get(arr: &'a JavaArray<'a, Self>, n: usize, cap: Capability) -> JniResult<Self> {
+		arr.env.get_object_array(arr, n, cap)
+	}
+
+	fn set(arr: &'a JavaArray<'a, Self>, n: usize, val: &Self, cap: Capability) {
+		arr.env.set_object_array(arr, n, val, cap)
 	}
 }
 
