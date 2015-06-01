@@ -1314,8 +1314,6 @@ macro_rules! impl_jobject(
 		}
 
 		impl<'a> JArrayElem<'a> for $cls<'a> {
-			type JniType = $cls<'a>;
-
 			fn new_array(env: &'a JavaEnv<'a>, len: usize, val: &$cls<'a>, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
 				let cls = val.get_class(&cap);
 				env.new_object_array(len, &cls, val, cap)
@@ -1596,8 +1594,6 @@ impl<'a> JObject<'a> for JavaDirectByteBuffer<'a> {
 }
 
 impl<'a> JArrayElem<'a> for JavaDirectByteBuffer<'a> {
-	type JniType = JavaDirectByteBuffer<'a>;
-
 	fn new_array(env: &'a JavaEnv<'a>, len: usize, val: &JavaDirectByteBuffer<'a>, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
 		let cls = val.get_class(&cap);
 		env.new_object_array(len, &cls, val, cap)
@@ -1613,16 +1609,12 @@ impl<'a> JArrayElem<'a> for JavaDirectByteBuffer<'a> {
 }
 
 pub trait JArrayElem<'a> {
-	type JniType: 'a;
-
 	fn new_array(env: &'a JavaEnv<'a>, len: usize, val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>>;
 	fn get(arr: &'a JavaArray<'a, Self>, n: usize, cap: Capability) -> JniResult<Self>;
 	fn set(arr: &'a JavaArray<'a, Self>, n: usize, val: &Self, cap: Capability);
 }
 
 impl<'a> JArrayElem<'a> for <jboolean as JPrimitive>::Type {
-	type JniType = jboolean;
-
 	fn new_array(env: &'a JavaEnv<'a>, len: usize, _val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
 		env.new_boolean_array(len, cap)
 	}
@@ -1641,8 +1633,6 @@ impl<'a> JArrayElem<'a> for <jboolean as JPrimitive>::Type {
 }
 
 impl<'a> JArrayElem<'a> for <jbyte as JPrimitive>::Type {
-	type JniType = jbyte;
-
 	fn new_array(env: &'a JavaEnv<'a>, len: usize, _val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
 		env.new_byte_array(len, cap)
 	}
@@ -1661,8 +1651,6 @@ impl<'a> JArrayElem<'a> for <jbyte as JPrimitive>::Type {
 }
 
 impl<'a> JArrayElem<'a> for <jchar as JPrimitive>::Type {
-	type JniType = jchar;
-
 	fn new_array(env: &'a JavaEnv<'a>, len: usize, _val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
 		env.new_char_array(len, cap)
 	}
@@ -1681,8 +1669,6 @@ impl<'a> JArrayElem<'a> for <jchar as JPrimitive>::Type {
 }
 
 impl<'a> JArrayElem<'a> for <jshort as JPrimitive>::Type {
-	type JniType = jshort;
-
 	fn new_array(env: &'a JavaEnv<'a>, len: usize, _val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
 		env.new_short_array(len, cap)
 	}
@@ -1701,8 +1687,6 @@ impl<'a> JArrayElem<'a> for <jshort as JPrimitive>::Type {
 }
 
 impl<'a> JArrayElem<'a> for <jint as JPrimitive>::Type {
-	type JniType = jint;
-
 	fn new_array(env: &'a JavaEnv<'a>, len: usize, _val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
 		env.new_int_array(len, cap)
 	}
@@ -1721,8 +1705,6 @@ impl<'a> JArrayElem<'a> for <jint as JPrimitive>::Type {
 }
 
 impl<'a> JArrayElem<'a> for <jlong as JPrimitive>::Type {
-	type JniType = jlong;
-
 	fn new_array(env: &'a JavaEnv<'a>, len: usize, _val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
 		env.new_long_array(len, cap)
 	}
@@ -1741,8 +1723,6 @@ impl<'a> JArrayElem<'a> for <jlong as JPrimitive>::Type {
 }
 
 impl<'a> JArrayElem<'a> for <jfloat as JPrimitive>::Type {
-	type JniType = jfloat;
-
 	fn new_array(env: &'a JavaEnv<'a>, len: usize, _val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
 		env.new_float_array(len, cap)
 	}
@@ -1761,8 +1741,6 @@ impl<'a> JArrayElem<'a> for <jfloat as JPrimitive>::Type {
 }
 
 impl<'a> JArrayElem<'a> for <jdouble as JPrimitive>::Type {
-	type JniType = jdouble;
-
 	fn new_array(env: &'a JavaEnv<'a>, len: usize, _val: &Self, cap: Capability) -> JniResult<JavaArray<'a, Self>> {
 		env.new_double_array(len, cap)
 	}
