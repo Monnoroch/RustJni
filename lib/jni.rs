@@ -1938,7 +1938,12 @@ mod tests {
 			test_JavaEnv(&jvm);
 		});
 
+		let t3 = thread::scoped(|| {
+			test_JavaEnv(&jvm);
+		});
+
 		let _ = t1.join();
 		let _ = t2.join();
+		let _ = t3.join();
 	}
 }
